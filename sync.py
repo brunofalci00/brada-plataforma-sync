@@ -636,6 +636,7 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
                                 if r[q["status"]].lower() == "aprovado"
                                 and r[q["valor_aprovado"]] != ""), 2),
         "n_migrados": len(users_rows) - len(novos),
+        "novos_total": len(novos),
         "novos_mes": sum(1 for r in novos if r[u["data_cadastro"]][:7] == mes),
         "novos_mes_ant": sum(1 for r in novos if r[u["data_cadastro"]][:7] == mes_ant),
         "ativacao_frac": (round(sum(1 for r in novos if r[u["logou_alguma_vez"]] == "sim")
