@@ -123,6 +123,12 @@ HEADER_SNAP = ["data_snapshot", "metrica", "segmento", "valor"]
 
 HEADER_META = ["chave", "valor"]
 
+# Comparativo de migracao (fonte: planilha da plataforma antiga; ver fonte_antiga.py)
+HEADER_MIGRACAO = [
+    "legacy_hash", "fim_execucao_antiga", "situacao_antiga", "no_baseline",
+    "existe_na_nova", "status_nova", "dono_migrado", "dono_logou",
+]
+
 # ===================================================
 # AUTENTICACAO
 # ===================================================
@@ -463,7 +469,74 @@ def build_proposals(proposals_raw, grants_raw, issues):
     return rows
 
 
-def build_snapshot(users_rows, projects_rows, proposals_rows, today_str):
+def build_migracao(antiga_rows, projects_raw, users_by_id, login_index, today_str):
+    """Cruza planilha antiga x Firestore x Auth. Retorna (rows da aba, metricas).
+    Joins EM MEMORIA; so legacy_hash + datas + flags saem pra Sheet."""
+    import fonte_antiga
+
+    hoje = datetime.date.fromisoformat(today_str)
+    proj_by_legacy = {}
+    for _, d in projects_raw:
+        lid = str(d.get("legacyId") or "").strip()
+        if lid:
+            proj_by_legacy[lid] = d
+
+    rows = []
+    sit_counter = Counter()
+    donos_ativos_logaram, donos_ativos_total = 0, 0
+    for r in antiga_rows:
+        sit = fonte_antiga.situacao(r["fim_execucao"], hoje)
+        sit_counter[sit] += 1
+        nb = fonte_antiga.no_baseline(r)
+        p = proj_by_legacy.get(str(r["legacy_id"]))
+        owner_id = (p or {}).get("ownerId") or ""
+        owner = users_by_id.get(owner_id, {})
+        dono_migrado = bool(owner.get("legacyId"))
+        dono_logou = bool(login_index.get(owner_id))
+        if nb and dono_migrado:
+            donos_ativos_total += 1
+            if dono_logou:
+                donos_ativos_logaram += 1
+        fim = r["fim_execucao"]
+        rows.append([
+            hash_id(r["legacy_id"]),
+            fim.isoformat() if isinstance(fim, datetime.date) else "",
+            sit,
+            sim_nao(nb),
+            sim_nao(p is not None),
+            str((p or {}).get("status") or ""),
+            sim_nao(dono_migrado),
+            sim_nao(dono_logou),
+        ])
+    rows.sort(key=lambda x: x[1], reverse=True)
+
+    # Migrados VISIVEIS na nova (fora de Rascunho = aparecem no matchmaking).
+    # NUNCA usar projects_ativos (mistura projetos novos) como numerador.
+    mig_visiveis = Counter()
+    for _, d in projects_raw:
+        if d.get("legacyId") and str(d.get("status") or "") not in ("", "Rascunho"):
+            mig_visiveis[str(d.get("status"))] += 1
+    base_total = sum(1 for u in users_by_id.values() if u.get("legacyId"))
+    base_logou = sum(1 for uid, u in users_by_id.items()
+                     if u.get("legacyId") and login_index.get(uid))
+    baseline_n = sum(1 for r in antiga_rows if fonte_antiga.no_baseline(r))
+
+    metrics = {
+        "antiga_situacao": dict(sit_counter),
+        "antiga_baseline": baseline_n,
+        "mig_visiveis_por_status": dict(mig_visiveis),
+        "mig_visiveis": sum(mig_visiveis.values()),
+        "retencao_frac": round(sum(mig_visiveis.values()) / baseline_n, 4) if baseline_n else 0,
+        "base_total": base_total,
+        "base_logou": base_logou,
+        "base_logou_frac": round(base_logou / base_total, 4) if base_total else 0,
+        "donos_ativos_logaram": donos_ativos_logaram,
+        "donos_ativos_total": donos_ativos_total,
+    }
+    return rows, metrics
+
+
+def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=None):
     """Formato longo: enum novo vira so um segmento novo (zero quebra de
     schema no Looker). Firestore nao tem historico — cada dia sem snapshot
     e um ponto de serie perdido."""
@@ -498,6 +571,19 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str):
     novos = [r for r in users_rows if r[u["is_migrado"]] == "nao"]
     for camada, n in sorted(Counter(r[u["origem_camada"]] for r in novos).items()):
         add("atribuicao_cobertura", camada, n)
+
+    # Comparativo de migracao (serie viva + baseline congelado + reativacao)
+    if mig:
+        for seg, n in sorted(mig["antiga_situacao"].items()):
+            add("antiga_projetos_por_situacao", seg, n)
+        add("antiga_ativos_baseline", "corte_2026-06-08", mig["antiga_baseline"])
+        add("migracao_migrados_visiveis", "(todos)", mig["mig_visiveis"])
+        for st, n in sorted(mig["mig_visiveis_por_status"].items()):
+            add("migracao_migrados_visiveis", st, n)
+        add("migracao_base_logou", "logaram", mig["base_logou"])
+        add("migracao_base_logou", "total", mig["base_total"])
+        add("migracao_donos_ativos_logaram", "logaram", mig["donos_ativos_logaram"])
+        add("migracao_donos_ativos_logaram", "total", mig["donos_ativos_total"])
     return snap
 
 def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt):
@@ -580,7 +666,7 @@ PII_PATTERNS_DIGITOS = [
     ("cnpj_cru", re.compile(r"(?<!\d)\d{14}(?!\d)")),
 ]
 COLUNAS_ISENTAS_DIGITOS = {"user_hash", "project_hash", "owner_hash",
-                           "proposal_hash", "user_hash_match"}
+                           "proposal_hash", "user_hash_match", "legacy_hash"}
 
 
 def pii_guard(tabs):
@@ -658,6 +744,7 @@ def main():
         "user_role_desconhecido": Counter(),
         "proposal_status_desconhecido": Counter(),
         "emails_com_multiplos_users": Counter(),
+        "antiga_data_invalida": Counter(),
     }
 
     print("=== Sync Plataforma Brada (Firestore + Auth) -> Sheets ===")
@@ -673,11 +760,23 @@ def main():
     login_index = load_auth_login_index()
     print(f"auth: users={len(login_index)}")
 
+    # Planilha da plataforma ANTIGA (KPI comparativo de migracao)
+    import fonte_antiga
+    gc = get_sheets_client()
+    antiga_rows = fonte_antiga.carregar_planilha(gc)
+    print(f"planilha antiga: {len(antiga_rows)} projetos")
+
     users_by_id = {doc_id: d for doc_id, d in users_raw}
     projects_rows, projects_by_owner = build_projects(projects_raw, users_by_id, today_str, issues)
     users_rows = build_users(users_raw, login_index, projects_by_owner, issues)
     proposals_rows = build_proposals(proposals_raw, grants_raw, issues)
-    snap_rows = build_snapshot(users_rows, projects_rows, proposals_rows, today_str)
+    mig_rows, mig_metrics = build_migracao(antiga_rows, projects_raw, users_by_id,
+                                           login_index, today_str)
+    n_inv = mig_metrics["antiga_situacao"].get("data_invalida", 0)
+    if n_inv:
+        issues["antiga_data_invalida"]["(contagem)"] = n_inv
+    snap_rows = build_snapshot(users_rows, projects_rows, proposals_rows, today_str,
+                               mig=mig_metrics)
 
     meta_rows = [
         ["ultima_execucao_brt", datetime.datetime.now(BRT).strftime("%d/%m/%Y %H:%M")],
@@ -695,6 +794,7 @@ def main():
         "raw_users": (HEADER_USERS, users_rows),
         "raw_projects": (HEADER_PROJECTS, projects_rows),
         "raw_proposals": (HEADER_PROPOSALS, proposals_rows),
+        "raw_migracao_projetos": (HEADER_MIGRACAO, mig_rows),
         "snap_diario": (HEADER_SNAP, snap_rows),
         "meta_sync": (HEADER_META, meta_rows),
     }
@@ -703,12 +803,13 @@ def main():
 
     now_brt = datetime.datetime.now(BRT)
     metrics = compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt)
+    metrics.update(mig_metrics)  # bloco MIGRACAO da aba Dashboard
 
     if args.dry_run:
         u = {h: i for i, h in enumerate(HEADER_USERS)}
         p = {h: i for i, h in enumerate(HEADER_PROJECTS)}
         print(f"[dry-run] users={len(users_rows)} projects={len(projects_rows)} "
-              f"proposals={len(proposals_rows)} snap={len(snap_rows)}")
+              f"proposals={len(proposals_rows)} migracao={len(mig_rows)} snap={len(snap_rows)}")
         print("[dry-run] dashboard metrics:", json.dumps(metrics, ensure_ascii=False))
         print("users por origem_camada:",
               dict(Counter(r[u["origem_camada"]] for r in users_rows)))
@@ -725,11 +826,11 @@ def main():
 
     if not SPREADSHEET_ID:
         raise SystemExit("SPREADSHEET_ID ausente (env ou ~/.brada-secrets/plataforma-sync.env).")
-    gc = get_sheets_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     write_overwrite(sh, "raw_users", HEADER_USERS, users_rows)
     write_overwrite(sh, "raw_projects", HEADER_PROJECTS, projects_rows)
     write_overwrite(sh, "raw_proposals", HEADER_PROPOSALS, proposals_rows)
+    write_overwrite(sh, "raw_migracao_projetos", HEADER_MIGRACAO, mig_rows)
     write_snapshot_idempotente(sh, snap_rows, today_str)
     write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
     # Dashboard POR ULTIMO: o carimbo de atualizacao so avanca se tudo acima passou
