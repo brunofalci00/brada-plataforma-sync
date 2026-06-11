@@ -500,6 +500,67 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str):
         add("atribuicao_cobertura", camada, n)
     return snap
 
+def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt):
+    """Agregados pra aba Dashboard (consumo humano direto). Mesma fonte de
+    verdade em memoria das raw_* — impossivel divergir."""
+    u = {h: i for i, h in enumerate(HEADER_USERS)}
+    p = {h: i for i, h in enumerate(HEADER_PROJECTS)}
+    q = {h: i for i, h in enumerate(HEADER_PROPOSALS)}
+
+    st = Counter(r[p["status"]] for r in projects_rows)
+    exp = Counter(r[p["expiracao_situacao"]] for r in projects_rows)
+    # Regua PROPOSTA de "ativo" (a validar com a Tamyris; rotulada na aba):
+    # status Disponivel ou Em Execucao E captacao nao expirada.
+    ativos = sum(1 for r in projects_rows
+                 if r[p["status"]] in ("Disponível", "Em Execução")
+                 and r[p["expiracao_situacao"]] != "expirado")
+
+    novos = [r for r in users_rows if r[u["is_migrado"]] == "nao"]
+    mes = now_brt.strftime("%Y-%m")
+    mes_ant = (now_brt.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
+
+    canais = {"organico": 0, "leadlovers": 0, "automatize": 0, "meta_ads": 0, "outro": 0}
+    for r in novos:
+        c = r[u["origem_canal"]]
+        if c in canais:
+            canais[c] += 1
+
+    # Serie semanal (ultimas 8 semanas, segunda a domingo)
+    monday = now_brt.date() - datetime.timedelta(days=now_brt.weekday())
+    semanas = []
+    for i in range(7, -1, -1):
+        ini = monday - datetime.timedelta(weeks=i)
+        fim = ini + datetime.timedelta(days=7)
+        n = sum(1 for r in novos
+                if ini.isoformat() <= r[u["data_cadastro"]] < fim.isoformat())
+        semanas.append((ini.strftime("%d/%m"), n))
+
+    return {
+        "proj_total": len(projects_rows),
+        "proj_ativos": ativos,
+        "st_disponivel": st.get("Disponível", 0),
+        "st_em_execucao": st.get("Em Execução", 0),
+        "st_rascunho": st.get("Rascunho", 0),
+        "st_concluido": st.get("Concluído", 0),
+        "exp_vigente": exp.get("vigente", 0),
+        "exp_expirado": exp.get("expirado", 0),
+        "exp_sem_data": exp.get("sem_data", 0),
+        "prop_aprovadas": sum(1 for r in proposals_rows if r[q["status"]].lower() == "aprovado"),
+        "prop_valor": round(sum(r[q["valor_aprovado"]] for r in proposals_rows
+                                if r[q["status"]].lower() == "aprovado"
+                                and r[q["valor_aprovado"]] != ""), 2),
+        "n_migrados": len(users_rows) - len(novos),
+        "novos_mes": sum(1 for r in novos if r[u["data_cadastro"]][:7] == mes),
+        "novos_mes_ant": sum(1 for r in novos if r[u["data_cadastro"]][:7] == mes_ant),
+        "ativacao_frac": (round(sum(1 for r in novos if r[u["logou_alguma_vez"]] == "sim")
+                                / len(novos), 4) if novos else 0),
+        "ativos_30d": sum(1 for r in users_rows if r[u["ativo_30d"]] == "sim"),
+        "canais": canais,
+        "semanas": semanas,
+        "utm_automatize": sum(1 for r in novos if r[u["origem_canal"]] == "automatize"),
+    }
+
+
 # ===================================================
 # GUARD ANTI-PII (pre-publicacao)
 # ===================================================
@@ -640,11 +701,15 @@ def main():
     pii_guard(tabs)
     print("pii_guard: OK (zero hits)")
 
+    now_brt = datetime.datetime.now(BRT)
+    metrics = compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt)
+
     if args.dry_run:
         u = {h: i for i, h in enumerate(HEADER_USERS)}
         p = {h: i for i, h in enumerate(HEADER_PROJECTS)}
         print(f"[dry-run] users={len(users_rows)} projects={len(projects_rows)} "
               f"proposals={len(proposals_rows)} snap={len(snap_rows)}")
+        print("[dry-run] dashboard metrics:", json.dumps(metrics, ensure_ascii=False))
         print("users por origem_camada:",
               dict(Counter(r[u["origem_camada"]] for r in users_rows)))
         print("users por origem_canal:",
@@ -667,6 +732,10 @@ def main():
     write_overwrite(sh, "raw_proposals", HEADER_PROPOSALS, proposals_rows)
     write_snapshot_idempotente(sh, snap_rows, today_str)
     write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
+    # Dashboard POR ULTIMO: o carimbo de atualizacao so avanca se tudo acima passou
+    import dashboard_layout
+    status_layout = dashboard_layout.ensure_dashboard(sh, metrics, now_brt.replace(tzinfo=None))
+    print(f"  Dashboard: valores atualizados | {status_layout}")
     print(f"plataforma_sync: OK | users={len(users_rows)} projects={len(projects_rows)} "
           f"proposals={len(proposals_rows)} | {round(time.time() - t0, 1)}s")
 
