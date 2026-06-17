@@ -1,8 +1,8 @@
 name: Mutirao Rascunho -> Planilha do time
 
-# Refresh sob demanda (botao "Run workflow"). SEM cron no v1: a deteccao de
-# "quem finalizou" so precisa rodar durante a semana do mutirao. Adicionar
-# schedule depois, se virar rotina.
+# Refresh a cada 3h (deteccao de quem finalizou) + botao "Run workflow".
+# O merge em run normal escreve so AUTO/DESFECHO (race-safe; nao toca o MANUAL
+# do time). Full-rewrite keyed so quando uma linha some (exclusao de conta).
 #
 # IMPORTANTE: nunca rodar com --sample no CI (repo publico = log publico).
 # O run padrao imprime SO contadores; a planilha de saida e privada.
@@ -11,6 +11,8 @@ name: Mutirao Rascunho -> Planilha do time
 # planilha dedicada do mutirao). FIREBASE/GOOGLE service accounts reusados.
 
 on:
+  schedule:
+    - cron: '0 */3 * * *'   # a cada 3 horas (UTC)
   workflow_dispatch: {}
 
 jobs:

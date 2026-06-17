@@ -367,11 +367,11 @@ def merge_rows(groups, users_by_id, today_str, ordem_exist, by_key, excluded_has
     return final_keys, auto_by_key, desf_by_key, status_by_key, novos_keys
 
 
-def write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, prev_n=0):
-    """Reescreve a tabela inteira keyed por owner_hash (padrao Sprint D): o
-    bloco MANUAL e LIDO da planilha e regravado na linha do MESMO owner_hash,
-    entao append/remocao/reorder nunca desalinha o manual com o dono. Linhas
-    novas recebem defaults. Idempotente."""
+def write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, novos_keys, prev_n=0):
+    """Merge hibrido keyed por owner_hash. Em operacao normal (append/update,
+    sem remocao) escreve SO AUTO+DESFECHO e nunca toca o MANUAL -> race-safe pro
+    cron com o time editando. So quando uma linha some (ex.: exclusao de conta
+    interna) faz full-rewrite keyed pra realinhar o MANUAL ao dono (run raro)."""
     n = len(final_keys)
     last = n + 1  # linha 1 = header
     ws.update(values=[HEADER], range_name="A1", value_input_option="USER_ENTERED")
@@ -380,19 +380,33 @@ def write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, prev_n=0):
             ws.batch_clear([f"A2:W{prev_n + 1}"])
         return
 
-    rows = []
-    for k in final_keys:
-        auto = _auto_list(auto_by_key[k])                       # A:M
-        prev = by_key.get(k)
-        if prev is not None:
-            manual = [prev[i] if i < len(prev) else "" for i in range(MANUAL_START, MANUAL_END + 1)]
-        else:
-            manual = ["", "", "", STATUS_DEFAULT, "", ""]       # N:S defaults p/ linha nova
-        rows.append(auto + manual + desf_by_key[k])             # + T:W
-    ws.update(values=rows, range_name=f"A2:W{last}", value_input_option="USER_ENTERED")
+    final_set = set(final_keys)
+    removeu = any(k not in final_set for k in by_key)  # linha existente saiu da lista
 
-    # Linhas que sumiram (ex.: exclusao de conta interna): limpa o rabo
-    if prev_n > n:
+    if removeu:
+        # full-rewrite keyed: le+regrava MANUAL na linha do mesmo dono (alinhamento)
+        rows = []
+        for k in final_keys:
+            prev = by_key.get(k)
+            manual = ([prev[i] if i < len(prev) else "" for i in range(MANUAL_START, MANUAL_END + 1)]
+                      if prev is not None else ["", "", "", STATUS_DEFAULT, "", ""])
+            rows.append(_auto_list(auto_by_key[k]) + manual + desf_by_key[k])
+        ws.update(values=rows, range_name=f"A2:W{last}", value_input_option="USER_ENTERED")
+    else:
+        # race-safe: escreve so AUTO (A:M) e DESFECHO (T:W); MANUAL intocado
+        a_end, t_start, w_end = _col_a1(N_AUTO - 1), _col_a1(DESF_START), _col_a1(DESF_END)
+        ws.update(values=[_auto_list(auto_by_key[k]) for k in final_keys],
+                  range_name=f"A2:{a_end}{last}", value_input_option="USER_ENTERED")
+        ws.update(values=[desf_by_key[k] for k in final_keys],
+                  range_name=f"{t_start}2:{w_end}{last}", value_input_option="USER_ENTERED")
+        if novos_keys:  # defaults manuais SO nas linhas novas (no fim)
+            first_new = (n - len(novos_keys)) + 2
+            n_start, s_end = _col_a1(MANUAL_START), _col_a1(MANUAL_END)
+            ws.update(values=[["", "", "", STATUS_DEFAULT, "", ""] for _ in novos_keys],
+                      range_name=f"{n_start}{first_new}:{s_end}{last}",
+                      value_input_option="USER_ENTERED")
+
+    if prev_n > n:  # limpa o rabo de linhas que sumiram
         ws.batch_clear([f"A{last + 1}:W{prev_n + 1}"])
 
 
@@ -556,7 +570,7 @@ def main():
                        if ((u.get("email") or "").strip().lower() in EXCLUDE_EMAILS)}
     final_keys, auto_by_key, desf_by_key, status_by_key, novos_keys = merge_rows(
         groups, users_by_id, today_str, ordem_exist, by_key, excluded_hashes)
-    write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, prev_n=len(ordem_exist))
+    write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, novos_keys, prev_n=len(ordem_exist))
     write_resumo(sh, status_by_key, desf_by_key, final_keys)
     if first_run:
         ensure_formatting(sh, ws)
