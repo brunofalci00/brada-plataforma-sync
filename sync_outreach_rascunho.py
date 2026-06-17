@@ -219,7 +219,10 @@ def build_owner_auto(uid, user, projs, today_str):
     else:
         detalhe = ""
 
-    migrado = "sim" if any(p.get("legacyId") for _, p in projs) else "nao"
+    # Migrado = nivel PESSOA (veio da base antiga), nao do projeto: um usuario
+    # migrado pode criar projeto novo na plataforma (engajou). O grao da aba e
+    # a pessoa, entao a coluna reflete o usuario.
+    migrado = "sim" if (user or {}).get("legacyId") else "nao"
     edicoes = [sync.to_date(p.get("updatedAt")) for _, p in projs]
     ultima = max([e for e in edicoes if e], default="")
 
@@ -262,7 +265,7 @@ def build_finisher_auto(owner_hash, uid, user, existing_row):
             "CAC": "—",
             "Falta": "(finalizou)",
             "Detalhe por projeto": "",
-            "Migrado?": "",
+            "Migrado?": "sim" if user.get("legacyId") else "nao",
             "Última edição": "",
             "Prioridade": 0,
             "_tel_valido": valido,
