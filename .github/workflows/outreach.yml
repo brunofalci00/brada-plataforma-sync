@@ -1,0 +1,34 @@
+name: Mutirao Rascunho -> Planilha do time
+
+# Refresh sob demanda (botao "Run workflow"). SEM cron no v1: a deteccao de
+# "quem finalizou" so precisa rodar durante a semana do mutirao. Adicionar
+# schedule depois, se virar rotina.
+#
+# IMPORTANTE: nunca rodar com --sample no CI (repo publico = log publico).
+# O run padrao imprime SO contadores; a planilha de saida e privada.
+#
+# Secret necessario alem dos do sync.py: OUTREACH_SPREADSHEET_ID (id da
+# planilha dedicada do mutirao). FIREBASE/GOOGLE service accounts reusados.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  outreach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Mutirao rascunho -> Sheets
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          OUTREACH_SPREADSHEET_ID: ${{ secrets.OUTREACH_SPREADSHEET_ID }}
+        run: python sync_outreach_rascunho.py
