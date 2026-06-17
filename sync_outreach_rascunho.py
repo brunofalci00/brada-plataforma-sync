@@ -45,6 +45,11 @@ def ohash(uid):
     da chave de merge. O prefixo garante texto sempre."""
     return "o" + sync.hash_id(uid)
 
+
+# Contas internas/teste que NUNCA entram na lista (e-mail lowercased).
+# Excluidas da contagem, da lista e removidas se ja estiverem na planilha.
+EXCLUDE_EMAILS = {"brunofalci2000@gmail.com"}
+
 # ===================================================
 # REGRA DE RASCUNHO (porta exata do isProjectComplete do front)
 # Ordem: os 3 campos quase-universais primeiro (descricao/orcamento/diario),
@@ -301,8 +306,9 @@ def load_existing(ws):
     return ordem, by_key
 
 
-def merge_rows(groups, users_by_id, today_str, ordem_exist, by_key):
+def merge_rows(groups, users_by_id, today_str, ordem_exist, by_key, excluded_hashes=frozenset()):
     """Produz a estrutura final preservando linhas existentes e anexando novas.
+    Chaves em excluded_hashes sao REMOVIDAS (nao retidas como finalizador).
     Retorna (final_keys, auto_by_key, desf_by_key, status_by_key, novos_keys)."""
     hash_to_uid = {ohash(uid): uid for uid in users_by_id}
     groups_by_hash = {ohash(uid): (uid, projs) for uid, projs in groups.items()}
@@ -329,6 +335,8 @@ def merge_rows(groups, users_by_id, today_str, ordem_exist, by_key):
 
     # 1) linhas existentes (mantem ordem/posicao)
     for key in ordem_exist:
+        if key in excluded_hashes:
+            continue  # conta interna/teste: remove da lista
         if key in groups_by_hash:
             uid, projs = groups_by_hash[key]
             auto = build_owner_auto(uid, users_by_id.get(uid), projs, today_str)
@@ -359,30 +367,33 @@ def merge_rows(groups, users_by_id, today_str, ordem_exist, by_key):
     return final_keys, auto_by_key, desf_by_key, status_by_key, novos_keys
 
 
-def write_merge(ws, final_keys, auto_by_key, desf_by_key, novos_keys, first_run):
+def write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, prev_n=0):
+    """Reescreve a tabela inteira keyed por owner_hash (padrao Sprint D): o
+    bloco MANUAL e LIDO da planilha e regravado na linha do MESMO owner_hash,
+    entao append/remocao/reorder nunca desalinha o manual com o dono. Linhas
+    novas recebem defaults. Idempotente."""
     n = len(final_keys)
     last = n + 1  # linha 1 = header
-
     ws.update(values=[HEADER], range_name="A1", value_input_option="USER_ENTERED")
     if n == 0:
+        if prev_n > 0:
+            ws.batch_clear([f"A2:W{prev_n + 1}"])
         return
 
-    auto_matrix = [_auto_list(auto_by_key[k]) for k in final_keys]
-    desf_matrix = [desf_by_key[k] for k in final_keys]
-    a_end = _col_a1(N_AUTO - 1)            # M
-    t_start = _col_a1(DESF_START)          # T
-    w_end = _col_a1(DESF_END)              # W
-    ws.update(values=auto_matrix, range_name=f"A2:{a_end}{last}", value_input_option="USER_ENTERED")
-    ws.update(values=desf_matrix, range_name=f"{t_start}2:{w_end}{last}", value_input_option="USER_ENTERED")
+    rows = []
+    for k in final_keys:
+        auto = _auto_list(auto_by_key[k])                       # A:M
+        prev = by_key.get(k)
+        if prev is not None:
+            manual = [prev[i] if i < len(prev) else "" for i in range(MANUAL_START, MANUAL_END + 1)]
+        else:
+            manual = ["", "", "", STATUS_DEFAULT, "", ""]       # N:S defaults p/ linha nova
+        rows.append(auto + manual + desf_by_key[k])             # + T:W
+    ws.update(values=rows, range_name=f"A2:W{last}", value_input_option="USER_ENTERED")
 
-    # MANUAL: escreve defaults SO nas linhas novas (nunca toca linhas existentes)
-    if novos_keys:
-        first_new_row = (n - len(novos_keys)) + 2
-        n_start, s_end = _col_a1(MANUAL_START), _col_a1(MANUAL_END)
-        defaults = [["", "", "", STATUS_DEFAULT, "", ""] for _ in novos_keys]
-        ws.update(values=defaults,
-                  range_name=f"{n_start}{first_new_row}:{s_end}{last}",
-                  value_input_option="USER_ENTERED")
+    # Linhas que sumiram (ex.: exclusao de conta interna): limpa o rabo
+    if prev_n > n:
+        ws.batch_clear([f"A{last + 1}:W{prev_n + 1}"])
 
 
 def write_resumo(sh, status_by_key, desf_by_key, final_keys):
@@ -476,12 +487,17 @@ def main():
 
     groups = defaultdict(list)
     sem_owner = 0
+    excluidos = 0
     for pid, p in projects_raw:
         if not is_rascunho(p):
             continue
         oid = p.get("ownerId") or ""
         if not oid:
             sem_owner += 1
+            continue
+        email = ((users_by_id.get(oid) or {}).get("email") or "").strip().lower()
+        if email in EXCLUDE_EMAILS:
+            excluidos += 1
             continue
         groups[oid].append((pid, p))
 
@@ -500,7 +516,8 @@ def main():
     freq_top = sorted(freq.items(), key=lambda x: -x[1])
 
     print(f"rascunho: {n_proj_rasc} projetos | {donos} pessoas | "
-          f"{vigentes_donos} com vigente | tel_valido={tel_validos} | sem_owner={sem_owner}")
+          f"{vigentes_donos} com vigente | tel_valido={tel_validos} | "
+          f"sem_owner={sem_owner} | excluidos={excluidos}")
     print("campos faltando (freq):", {k: v for k, v in freq_top})
 
     if args.sample:
@@ -535,9 +552,11 @@ def main():
         first_run = True
 
     ordem_exist, by_key = load_existing(ws)
+    excluded_hashes = {ohash(uid) for uid, u in users_by_id.items()
+                       if ((u.get("email") or "").strip().lower() in EXCLUDE_EMAILS)}
     final_keys, auto_by_key, desf_by_key, status_by_key, novos_keys = merge_rows(
-        groups, users_by_id, today_str, ordem_exist, by_key)
-    write_merge(ws, final_keys, auto_by_key, desf_by_key, novos_keys, first_run)
+        groups, users_by_id, today_str, ordem_exist, by_key, excluded_hashes)
+    write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, prev_n=len(ordem_exist))
     write_resumo(sh, status_by_key, desf_by_key, final_keys)
     if first_run:
         ensure_formatting(sh, ws)
