@@ -46,9 +46,23 @@ def ohash(uid):
     return "o" + sync.hash_id(uid)
 
 
-# Contas internas/teste que NUNCA entram na lista (e-mail lowercased).
+# Contas internas/teste que NUNCA entram em outreach (mutirao E frios).
 # Excluidas da contagem, da lista e removidas se ja estiverem na planilha.
 EXCLUDE_EMAILS = {"brunofalci2000@gmail.com"}
+# Dominios internos da Brada: qualquer e-mail nesses dominios e conta da
+# propria empresa (suporte/marketing/inovacao/colaboradores), nunca um lead.
+EXCLUDE_DOMAINS = {"somosbrada.com.br", "brada.social"}
+
+
+def is_excluded(email):
+    """True se for conta interna/teste da Brada (e-mail exato ou dominio interno)."""
+    e = (email or "").strip().lower()
+    if not e:
+        return False
+    if e in EXCLUDE_EMAILS:
+        return True
+    dom = e.rsplit("@", 1)[-1] if "@" in e else ""
+    return dom in EXCLUDE_DOMAINS
 
 # ===================================================
 # REGRA DE RASCUNHO (porta exata do isProjectComplete do front)
@@ -363,7 +377,9 @@ def merge_rows(groups, users_by_id, today_str, ordem_exist, by_key, excluded_has
     novos.sort(key=lambda x: -x[1])
     novos_keys = [k for k, _ in novos]
 
-    final_keys = list(ordem_exist) + novos_keys
+    # exclui as chaves removidas (conta interna que estava na planilha) -> cai no
+    # full-rewrite keyed do write_merge, que realinha e limpa a linha.
+    final_keys = [k for k in ordem_exist if k not in excluded_hashes] + novos_keys
     return final_keys, auto_by_key, desf_by_key, status_by_key, novos_keys
 
 
@@ -509,8 +525,7 @@ def main():
         if not oid:
             sem_owner += 1
             continue
-        email = ((users_by_id.get(oid) or {}).get("email") or "").strip().lower()
-        if email in EXCLUDE_EMAILS:
+        if is_excluded((users_by_id.get(oid) or {}).get("email")):
             excluidos += 1
             continue
         groups[oid].append((pid, p))
@@ -567,7 +582,7 @@ def main():
 
     ordem_exist, by_key = load_existing(ws)
     excluded_hashes = {ohash(uid) for uid, u in users_by_id.items()
-                       if ((u.get("email") or "").strip().lower() in EXCLUDE_EMAILS)}
+                       if is_excluded(u.get("email"))}
     final_keys, auto_by_key, desf_by_key, status_by_key, novos_keys = merge_rows(
         groups, users_by_id, today_str, ordem_exist, by_key, excluded_hashes)
     write_merge(ws, final_keys, auto_by_key, desf_by_key, by_key, novos_keys, prev_n=len(ordem_exist))
