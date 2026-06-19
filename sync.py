@@ -112,6 +112,7 @@ HEADER_PROJECTS = [
     "owner_hash", "owner_role",
     "data_expiracao_cac", "expiracao_situacao",
     "ods_principal", "n_ods", "uf", "budget_valor", "budget_faixa",
+    "dados_em_atualizacao",
 ]
 
 HEADER_PROPOSALS = [
@@ -329,6 +330,24 @@ def load_collection(db, name):
 # BUILD DAS ABAS
 # ===================================================
 
+# Espelha isProjectComplete do front (brada-plataforma-v3 Projects.tsx:372) e a
+# porta de sync_outreach_rascunho. Inline aqui pra evitar import circular
+# (sync_outreach_rascunho importa este modulo).
+PROJ_CAMPOS_OBRIG = ("title", "budget", "startDate", "description", "targetAudience",
+                     "location", "category", "fundingSource", "cacExpirationDate")
+
+
+def projeto_incompleto(d):
+    if not all(d.get(k) for k in PROJ_CAMPOS_OBRIG):
+        return True
+    ods = d.get("ods")
+    if not (ods and (len(ods) > 0 if isinstance(ods, list) else True)):
+        return True
+    if not (d.get("diarioOficialUrl") or d.get("existingDiarioOficialUrl")):
+        return True
+    return False
+
+
 def build_projects(projects_raw, users_by_id, today_str, issues):
     """raw_projects + indices auxiliares (owner -> projetos)."""
     rows = []
@@ -353,6 +372,9 @@ def build_projects(projects_raw, users_by_id, today_str, issues):
         if not isinstance(ods, list):
             ods = [ods]
         budget = parse_budget_brl(d.get("budget"))
+        # selo "dados em atualizacao" = publicado (Disponivel) mas ainda incompleto.
+        # Base honesta da segmentacao (burn-down conforme o dono completa).
+        selo = sim_nao(status == "Disponível" and projeto_incompleto(d))
         row = [
             hash_id(doc_id),
             data_criacao,
@@ -368,6 +390,7 @@ def build_projects(projects_raw, users_by_id, today_str, issues):
             str(d.get("location") or "").strip(),
             budget,
             budget_faixa(budget),
+            selo,
         ]
         rows.append(row)
         if owner_id:
@@ -557,6 +580,10 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
 
     for status, n in sorted(Counter(r[p["status"]] or "(vazio)" for r in projects_rows).items()):
         add("projects_por_status", status, n)
+    _n_selo = sum(1 for r in projects_rows if r[p["dados_em_atualizacao"]] == "sim")
+    _n_disp = Counter(r[p["status"]] for r in projects_rows).get("Disponível", 0)
+    add("disponivel_por_completude", "dados_em_atualizacao", _n_selo)
+    add("disponivel_por_completude", "completo", _n_disp - _n_selo)
     for sit, n in sorted(Counter(r[p["expiracao_situacao"]] for r in projects_rows).items()):
         add("projects_por_expiracao", sit, n)
     add("projects_total", "(todos)", len(projects_rows))
@@ -595,6 +622,7 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
 
     st = Counter(r[p["status"]] for r in projects_rows)
     exp = Counter(r[p["expiracao_situacao"]] for r in projects_rows)
+    n_selo = sum(1 for r in projects_rows if r[p["dados_em_atualizacao"]] == "sim")
     # Regua PROPOSTA de "ativo" (a validar com a Tamyris; rotulada na aba):
     # status Disponivel ou Em Execucao E captacao nao expirada.
     ativos = sum(1 for r in projects_rows
@@ -625,6 +653,8 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "proj_total": len(projects_rows),
         "proj_ativos": ativos,
         "st_disponivel": st.get("Disponível", 0),
+        "st_disponivel_selo": n_selo,
+        "st_disponivel_completo": st.get("Disponível", 0) - n_selo,
         "st_em_execucao": st.get("Em Execução", 0),
         "st_rascunho": st.get("Rascunho", 0),
         "st_concluido": st.get("Concluído", 0),

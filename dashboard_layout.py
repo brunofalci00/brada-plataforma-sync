@@ -282,6 +282,9 @@ def value_data(m, now_brt_naive):
         ("A28", [[label, m["canais"].get(key, 0)] for key, label in CANAIS_EXIBIDOS]
                 + [["Total", sum(m["canais"].values())]]),
         ("D28", [[lbl, n] for lbl, n in m["semanas"]]),
+        ("A37", [["PUBLICAÇÃO (rascunhos vigentes)"]]),
+        ("A38", [[m["st_disponivel_completo"]]]), ("C38", [[m["st_disponivel_selo"]]]),
+        ("A40", [["Disponíveis completos"]]), ("C40", [["Dados em atualização"]]),
     ]
     return [{"range": f"{DASH_TITLE}!{rng}", "values": vals} for rng, vals in d]
 
