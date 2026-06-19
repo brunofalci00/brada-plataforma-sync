@@ -34,3 +34,10 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           OUTREACH_SPREADSHEET_ID: ${{ secrets.OUTREACH_SPREADSHEET_ID }}
         run: python sync_outreach_rascunho.py
+
+      # Auto-cura: re-publica SO os que nos publicamos e o dono reverteu pra
+      # Rascunho (--heal nao publica rascunho novo). Substitui o hardening do Thiago.
+      - name: Auto-cura publicacao rascunhos
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: python publicar_rascunhos_vigentes.py --apply --heal

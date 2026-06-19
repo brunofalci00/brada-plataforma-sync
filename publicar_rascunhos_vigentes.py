@@ -168,6 +168,9 @@ def main():
     ap = argparse.ArgumentParser(description="Publicar rascunhos vigentes")
     ap.add_argument("--apply", action="store_true", help="escreve no Firestore (default: dry-run)")
     ap.add_argument("--canario", type=int, default=0, help="aplica so nos N (estratificado por risco)")
+    ap.add_argument("--heal", action="store_true",
+                    help="auto-cura: SO re-publica os que ja tinham autoPublicadoEm e o dono reverteu "
+                         "(nao publica rascunho novo). Usado pelo cron.")
     ap.add_argument("--revert", metavar="RUN_ISO", default="", help="reverte os docs daquela run (autoPublicadoEm==RUN_ISO)")
     args = ap.parse_args()
 
@@ -204,6 +207,11 @@ def main():
     print(f"donos distintos: {donos}")
 
     alvo = _estratificar(cand)
+    if args.heal:
+        # so re-publica os que NOS publicamos e o dono reverteu (tem marker).
+        # NUNCA publica rascunho novo (projeto que o dono ainda esta criando).
+        alvo = [c for c in alvo if c[1].get("autoPublicadoEm")]
+        print(f"[heal] candidatos com marker (reverted): {len(alvo)}")
     if args.canario:
         alvo = alvo[: args.canario]
 
