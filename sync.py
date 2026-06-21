@@ -295,7 +295,11 @@ def origem_canal(utm_source, is_migrado):
         return "automatize"
     if src == "leadlovers":
         return "leadlovers"
-    if src in ("meta", "facebook", "fb", "instagram", "meta_ads"):
+    if src == "comercial":
+        return "comercial"
+    if src == "instagram":
+        return "instagram"
+    if src in ("meta", "facebook", "fb", "meta_ads"):
         return "meta_ads"
     if src:
         return "outro"
@@ -633,7 +637,8 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     mes = now_brt.strftime("%Y-%m")
     mes_ant = (now_brt.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
 
-    canais = {"organico": 0, "leadlovers": 0, "automatize": 0, "meta_ads": 0, "outro": 0}
+    canais = {"organico": 0, "leadlovers": 0, "automatize": 0, "meta_ads": 0,
+              "instagram": 0, "comercial": 0, "outro": 0}
     for r in novos:
         c = r[u["origem_canal"]]
         if c in canais:

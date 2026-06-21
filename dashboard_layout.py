@@ -20,7 +20,7 @@ card "Ativacao" (proxy ~100% por auto-login) trocado por "Total de novos".
 
 import datetime
 
-LAYOUT_VERSION = "v3"
+LAYOUT_VERSION = "v4"
 DASH_TITLE = "Dashboard"
 SENTINEL_CELL = "Z1"
 
@@ -37,6 +37,8 @@ CANAIS_EXIBIDOS = [
     ("leadlovers", "LeadLovers"),
     ("automatize", "Automatize (IA)"),
     ("meta_ads", "Meta Ads"),
+    ("instagram", "Instagram (orgânico)"),
+    ("comercial", "Comercial"),
     ("outro", "Outro"),
 ]
 
