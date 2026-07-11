@@ -702,7 +702,8 @@ PII_PATTERNS_DIGITOS = [
     ("cnpj_cru", re.compile(r"(?<!\d)\d{14}(?!\d)")),
 ]
 COLUNAS_ISENTAS_DIGITOS = {"user_hash", "project_hash", "owner_hash",
-                           "proposal_hash", "user_hash_match", "legacy_hash"}
+                           "proposal_hash", "user_hash_match", "legacy_hash",
+                           "utm_term"}  # lead_id da Automatize: id controlado, nao-PII
 
 
 def pii_guard(tabs):
