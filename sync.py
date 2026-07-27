@@ -64,6 +64,17 @@ _load_local_env(os.path.expanduser(r"~/.brada-secrets/plataforma-sync.env"))
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 
+# Endpoint de leads da Automatize (export-leads-automatize). Token via env
+# AUTOMATIZE_ENDPOINT_TOKEN (secret no CI; ~/.brada-secrets/plataforma-sync.env local).
+# Cap confirmado de 1000/resposta SEM paginacao -> ingestao incremental por janela
+# + dedup por lead_id (o forward acumula apesar do cap). Validado ao vivo 27/07.
+AUTOMATIZE_ENDPOINT_URL = os.environ.get(
+    "AUTOMATIZE_ENDPOINT_URL",
+    "https://n8n-webhook.painel.automatizenow.io/webhook/export-leads-automatize",
+)
+AUTOMATIZE_ENDPOINT_TOKEN = os.environ.get("AUTOMATIZE_ENDPOINT_TOKEN", "")
+LEADS_LOOKBACK_DAYS = 45  # janela do incremental ?atualizados_desde
+
 # Service account Google Sheets (mesma do hubspot-sync / clickup-sync)
 SHEETS_SA_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 SHEETS_SA_FILE = os.environ.get(
@@ -128,6 +139,18 @@ HEADER_META = ["chave", "valor"]
 HEADER_MIGRACAO = [
     "legacy_hash", "fim_execucao_antiga", "situacao_antiga", "no_baseline",
     "existe_na_nova", "status_nova", "dono_migrado", "dono_logou",
+]
+
+# Leads da Automatize (endpoint export-leads-automatize). SO o subconjunto
+# nao-PII do consumidor "dashboard" + colunas de join com o cadastro.
+# Contato/dossie (nome/email/telefone/projeto_*/hunter_resumo/drive_url) NAO
+# entram: repo publico; esses vivem na base privada do back-office (Thiago).
+HEADER_LEADS_AUTOMATIZE = [
+    "lead_id", "publico", "uf", "cidade", "segmento", "lei",
+    "match_score", "classificacao", "canal", "fonte_coleta", "hunter_nivel",
+    "estagio", "coletado_em", "tocado_em", "respondido_em", "direcionado_em",
+    "status", "motivo_perda", "backfill",
+    "cadastrou_plataforma", "data_cadastro_plataforma", "tem_projeto_plataforma",
 ]
 
 # ===================================================
@@ -293,6 +316,8 @@ def origem_canal(utm_source, is_migrado):
     src = norm_utm(utm_source)
     if src == "automatize":
         return "automatize"
+    if src == "site":
+        return "site"
     if src == "leadlovers":
         return "leadlovers"
     if src == "comercial":
@@ -563,6 +588,105 @@ def build_migracao(antiga_rows, projects_raw, users_by_id, login_index, today_st
     return rows, metrics
 
 
+def load_automatize_leads(now_brt, issues):
+    """Puxa leads do endpoint da Automatize (incremental por janela; cap de
+    1000/resposta sem paginacao). Retorna lista de dicts ou None. None (falha,
+    sem token, formato) faz o sync PULAR a aba sem sobrescrever o historico.
+    NUNCA loga token / URL-com-token / body."""
+    if not AUTOMATIZE_ENDPOINT_TOKEN:
+        issues["endpoint_automatize"]["sem_token"] = 1
+        print("  leads_automatize: sem AUTOMATIZE_ENDPOINT_TOKEN -> aba nao tocada")
+        return None
+    import requests
+
+    since = (now_brt - datetime.timedelta(days=LEADS_LOOKBACK_DAYS)).astimezone(
+        datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        r = requests.get(
+            AUTOMATIZE_ENDPOINT_URL,
+            headers={"Authorization": f"Bearer {AUTOMATIZE_ENDPOINT_TOKEN}"},
+            params={"atualizados_desde": since},
+            timeout=90,
+        )
+    except Exception as e:  # noqa: BLE001 (falha de rede nao pode quebrar o sync)
+        issues["endpoint_automatize"][f"conexao_{type(e).__name__}"] = 1
+        print(f"  leads_automatize: erro de conexao ({type(e).__name__}) -> aba nao tocada")
+        return None
+    if r.status_code != 200:
+        issues["endpoint_automatize"][f"http_{r.status_code}"] = 1
+        print(f"  leads_automatize: HTTP {r.status_code} -> aba nao tocada (body/token nao logados)")
+        return None
+    try:
+        data = r.json()
+    except ValueError:
+        issues["endpoint_automatize"]["json_invalido"] = 1
+        print("  leads_automatize: resposta nao-JSON -> aba nao tocada")
+        return None
+    if isinstance(data, dict):
+        for k in ("data", "leads", "results", "items"):
+            if isinstance(data.get(k), list):
+                data = data[k]
+                break
+    if not isinstance(data, list):
+        issues["endpoint_automatize"]["formato_inesperado"] = 1
+        print("  leads_automatize: payload nao e array -> aba nao tocada")
+        return None
+    if len(data) >= 1000:
+        issues["endpoint_automatize"]["possivel_truncamento_1000"] = len(data)
+    print(f"  leads_automatize: {len(data)} leads (desde {since}Z)")
+    return data
+
+
+def build_leads_automatize(leads_raw, users_rows, issues):
+    """raw_leads_automatize: subconjunto nao-PII + join lead_id<->utm_term.
+    Funil vem do campo 'estagio' (os timestamps de etapa nao sao confiaveis:
+    direcionado_em/respondido_em vem null). lead_id cru (UUID, nao-PII) casa
+    com users.attribution.utm_term (que passa por norm_utm -> lower)."""
+    u = {h: i for i, h in enumerate(HEADER_USERS)}
+    utm_idx = {}
+    for r in users_rows:
+        t = r[u["utm_term"]]
+        if t:
+            utm_idx[t] = r
+    li = {h: i for i, h in enumerate(HEADER_LEADS_AUTOMATIZE)}
+    rows, seen = [], set()
+    for d in leads_raw:
+        lid = str(d.get("lead_id") or "").strip().lower()
+        if not lid or lid in seen:
+            continue  # dedup dentro do proprio pull
+        seen.add(lid)
+        user = utm_idx.get(lid)
+        score = d.get("matchScore")
+        rows.append([
+            lid,
+            str(d.get("publico") or ""),
+            str(d.get("uf") or ""),
+            str(d.get("cidade") or ""),
+            str(d.get("segmento") or ""),
+            str(d.get("lei") or ""),
+            score if isinstance(score, (int, float)) else "",
+            str(d.get("classificacao") or ""),
+            str(d.get("canal") or ""),
+            str(d.get("fonte_coleta") or ""),
+            str(d.get("hunter_nivel") or ""),
+            str(d.get("estagio") or ""),
+            to_date(d.get("coletado_em")),
+            to_date(d.get("tocado_em")),
+            to_date(d.get("respondido_em")),
+            to_date(d.get("direcionado_em")),
+            str(d.get("status") or ""),
+            str(d.get("motivo_perda") or ""),
+            sim_nao(bool(d.get("backfill"))),
+            sim_nao(user is not None),
+            user[u["data_cadastro"]] if user else "",
+            user[u["tem_projeto"]] if user else "",
+        ])
+    rows.sort(key=lambda r: r[li["coletado_em"]], reverse=True)
+    n_cad = sum(1 for r in rows if r[li["cadastrou_plataforma"]] == "sim")
+    print(f"  leads_automatize: {len(rows)} linhas | {n_cad} cruzaram com cadastro")
+    return rows
+
+
 def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=None):
     """Formato longo: enum novo vira so um segmento novo (zero quebra de
     schema no Looker). Firestore nao tem historico — cada dia sem snapshot
@@ -703,23 +827,32 @@ PII_PATTERNS_DIGITOS = [
 ]
 COLUNAS_ISENTAS_DIGITOS = {"user_hash", "project_hash", "owner_hash",
                            "proposal_hash", "user_hash_match", "legacy_hash",
-                           "utm_term"}  # lead_id da Automatize: id controlado, nao-PII
+                           "utm_term", "lead_id"}  # utm_term/lead_id: id controlado, nao-PII
+
+
+def pii_scan(header, rows):
+    """Hits 'coluna linha N [label]' de uma aba (sem valores). NAO aborta —
+    usado tanto pelo guard interno (abort) quanto pelo soft-guard da aba de
+    leads externos (pular a aba sem derrubar o sync)."""
+    hits = []
+    for i, row in enumerate(rows):
+        for j, cell in enumerate(row):
+            txt = str(cell)
+            patterns = list(PII_PATTERNS_GLOBAIS)
+            if header[j] not in COLUNAS_ISENTAS_DIGITOS:
+                patterns += PII_PATTERNS_DIGITOS
+            for label, pat in patterns:
+                if pat.search(txt):
+                    hits.append(f"{header[j]} linha {i + 2} [{label}]")
+    return hits
 
 
 def pii_guard(tabs):
-    """tabs = {nome_aba: (header, rows)}. Aborta no primeiro hit.
+    """tabs = {nome_aba: (header, rows)}. Aborta no primeiro hit (dados INTERNOS).
     NUNCA imprime o valor que bateu (log publico) — so aba/linha/coluna."""
     hits = []
     for tab, (header, rows) in tabs.items():
-        for i, row in enumerate(rows):
-            for j, cell in enumerate(row):
-                txt = str(cell)
-                patterns = list(PII_PATTERNS_GLOBAIS)
-                if header[j] not in COLUNAS_ISENTAS_DIGITOS:
-                    patterns += PII_PATTERNS_DIGITOS
-                for label, pat in patterns:
-                    if pat.search(txt):
-                        hits.append(f"{tab}!{header[j]} linha {i + 2} [{label}]")
+        hits += [f"{tab}!{h}" for h in pii_scan(header, rows)]
     if hits:
         print("PII GUARD FALHOU — publicacao ABORTADA. Posicoes (sem valores):")
         for h in hits[:20]:
@@ -763,6 +896,36 @@ def write_snapshot_idempotente(sh, snap_rows, today_str):
     print(f"  snap_diario: {len(snap_rows)} linhas de {today_str} "
           f"(+{len(kept)} historicas preservadas)")
 
+
+def write_leads_dedup(sh, header, new_rows):
+    """Append idempotente por lead_id (coluna 0): preserva leads ja vistos e
+    substitui os que voltaram no pull (dado mais fresco vence). Acumula o
+    forward completo apesar do cap de 1000/pull. Ordena por coletado_em desc."""
+    import gspread
+
+    name = "raw_leads_automatize"
+    try:
+        ws = sh.worksheet(name)
+        existing = ws.get_all_values()
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=name, rows=max(2000, len(new_rows) + 200),
+                              cols=max(len(header), 4))
+        existing = []
+    by_id = {}
+    for r in (existing[1:] if existing else []):
+        if r and r[0]:
+            by_id[r[0]] = r
+    n_hist_antes = len(by_id)
+    for r in new_rows:
+        by_id[r[0]] = r
+    col_col = header.index("coletado_em")
+    all_rows = sorted(by_id.values(), key=lambda r: str(r[col_col]) if len(r) > col_col else "",
+                      reverse=True)
+    ws.clear()
+    ws.update(values=[header] + all_rows, range_name="A1")
+    print(f"  raw_leads_automatize: {len(new_rows)} do pull | {len(all_rows)} no total "
+          f"(historico anterior: {n_hist_antes})")
+
 # ===================================================
 # MAIN
 # ===================================================
@@ -782,6 +945,7 @@ def main():
         "proposal_status_desconhecido": Counter(),
         "emails_com_multiplos_users": Counter(),
         "antiga_data_invalida": Counter(),
+        "endpoint_automatize": Counter(),
     }
 
     print("=== Sync Plataforma Brada (Firestore + Auth) -> Sheets ===")
@@ -812,6 +976,19 @@ def main():
     n_inv = mig_metrics["antiga_situacao"].get("data_invalida", 0)
     if n_inv:
         issues["antiga_data_invalida"]["(contagem)"] = n_inv
+
+    # Leads da Automatize (endpoint). NAO pode quebrar o sync: None -> pula a aba.
+    # Soft-guard de PII: se a aba externa tiver hit, PULA so ela (sem abortar).
+    leads_raw = load_automatize_leads(datetime.datetime.now(BRT), issues)
+    leads_rows = (build_leads_automatize(leads_raw, users_rows, issues)
+                  if leads_raw is not None else None)
+    if leads_rows is not None:
+        _leads_pii = pii_scan(HEADER_LEADS_AUTOMATIZE, leads_rows)
+        if _leads_pii:
+            issues["endpoint_automatize"]["pii_hit_aba_pulada"] = len(_leads_pii)
+            print(f"  raw_leads_automatize: {len(_leads_pii)} hit(s) de PII -> aba PULADA (sem abortar)")
+            leads_rows = None
+
     snap_rows = build_snapshot(users_rows, projects_rows, proposals_rows, today_str,
                                mig=mig_metrics)
 
@@ -823,6 +1000,8 @@ def main():
         ["n_proposals", len(proposals_rows)],
         ["snapshot_data", today_str],
     ]
+    if leads_rows is not None:
+        meta_rows.append(["n_leads_automatize", len(leads_rows)])
     for k, counter in issues.items():
         if counter:
             meta_rows.append([f"aviso_{k}", json.dumps(dict(counter), ensure_ascii=False)])
@@ -856,6 +1035,16 @@ def main():
               dict(Counter(r[p["status"]] for r in projects_rows)))
         print("projects por expiracao:",
               dict(Counter(r[p["expiracao_situacao"]] for r in projects_rows)))
+        if leads_rows is not None:
+            li = {h: i for i, h in enumerate(HEADER_LEADS_AUTOMATIZE)}
+            print("leads_automatize por estagio:",
+                  dict(Counter(r[li["estagio"]] for r in leads_rows)))
+            print("leads_automatize cadastrou:",
+                  dict(Counter(r[li["cadastrou_plataforma"]] for r in leads_rows)))
+            print("leads_automatize backfill:",
+                  dict(Counter(r[li["backfill"]] for r in leads_rows)))
+        else:
+            print("leads_automatize: None (sem token/erro/PII) -> aba nao seria tocada")
         for r in meta_rows:
             print("meta:", r[0], "=", r[1])
         print("plataforma_sync: DRY-RUN (nada escrito no Sheets)")
@@ -870,6 +1059,10 @@ def main():
     write_overwrite(sh, "raw_migracao_projetos", HEADER_MIGRACAO, mig_rows)
     write_snapshot_idempotente(sh, snap_rows, today_str)
     write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
+    # Leads da Automatize (append+dedup). Externo -> nao aborta o sync; se None
+    # (falha/sem token/PII) a aba fica intocada, preservando o historico.
+    if leads_rows is not None:
+        write_leads_dedup(sh, HEADER_LEADS_AUTOMATIZE, leads_rows)
     # Dashboard POR ULTIMO: o carimbo de atualizacao so avanca se tudo acima passou
     import dashboard_layout
     status_layout = dashboard_layout.ensure_dashboard(sh, metrics, now_brt.replace(tzinfo=None))

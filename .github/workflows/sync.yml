@@ -23,5 +23,6 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          AUTOMATIZE_ENDPOINT_TOKEN: ${{ secrets.AUTOMATIZE_ENDPOINT_TOKEN }}
           # Sprint 2 (funil Automatize): HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
         run: python sync.py
