@@ -24,7 +24,7 @@ Guarda-corpos:
   - nunca reenvia o mesmo toque para o mesmo projeto
   - cada execucao grava um CSV de log em scripts/logs/regua_expiracao/
 """
-import argparse, csv, datetime as dt, json, os, pathlib, re, sys
+import argparse, csv, datetime as dt, json, os, pathlib, re, sys, time
 
 from google.cloud import firestore
 from google.oauth2 import service_account
@@ -47,6 +47,11 @@ def conectar():
     return firestore.Client(project=PROJECT_ID, database=DATABASE, credentials=creds)
 PLATAFORMA_URL = "https://match.brada.social"
 COL_CONTROLE = "regua_expiracao_envios"
+MARCA_ORIGEM = "regua_expiracao"
+
+# O Gmail devolve 421-4.3.0 quando recebe uma rajada do mesmo remetente.
+# Espacar os envios evita a falha, que e o que aconteceu no 1o disparo (4 de 31).
+PAUSA_ENTRE_ENVIOS_S = 1.5
 
 # Dominios e enderecos internos: nunca recebem a regua.
 DOMINIOS_INTERNOS = ("@brada.social", "@somosbrada.com.br")
@@ -205,9 +210,52 @@ def coletar(db, hoje, toques):
 # --------------------------------------------------------------------------- #
 # Execucao
 # --------------------------------------------------------------------------- #
+def retentar_falhas(db, aplicar: bool) -> int:
+    """
+    Reenfileira os e-mails da regua que a extensao marcou como ERROR.
+
+    Necessario porque o controle de idempotencia grava no momento em que o
+    e-mail entra na fila, nao quando ele e entregue: sem isso, uma falha de
+    entrega (ex.: 421 do Gmail por rajada) ficaria perdida para sempre.
+    O doc original recebe `retentadoEm` para nao entrar em loop.
+    """
+    prefixos = ("O projeto ", "O prazo do projeto ")
+    candidatos = []
+    for d in db.collection("mail").stream():
+        x = d.to_dict() or {}
+        deliv = x.get("delivery") or {}
+        if str(deliv.get("state")) != "ERROR" or x.get("retentadoEm"):
+            continue
+        msg = x.get("message") or {}
+        e_da_regua = x.get("origem") == MARCA_ORIGEM or str(msg.get("subject") or "").startswith(prefixos)
+        if e_da_regua and x.get("to"):
+            candidatos.append((d, x))
+
+    print(f"\n=== RETENTATIVA: {len(candidatos)} e-mail(s) com falha de entrega ===")
+    for d, x in candidatos:
+        msg = x.get("message") or {}
+        erro = str((x.get("delivery") or {}).get("error") or "")[:70]
+        print(f"    {mascarar(x.get('to')):<28} {str(msg.get('subject'))[:44]}")
+        print(f"        motivo: {erro}")
+        if aplicar:
+            db.collection("mail").add({
+                "to": x["to"],
+                "createdAt": firestore.SERVER_TIMESTAMP,
+                "message": {"subject": msg.get("subject"), "html": msg.get("html")},
+                "origem": MARCA_ORIGEM,
+            })
+            d.reference.update({"retentadoEm": firestore.SERVER_TIMESTAMP})
+            time.sleep(PAUSA_ENTRE_ENVIOS_S)
+    if not aplicar and candidatos:
+        print("    DRY-RUN: nada reenfileirado. Use --apply.")
+    return len(candidatos)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="envia de verdade (padrao e dry-run)")
+    ap.add_argument("--retentar", action="store_true",
+                    help="reenfileira so os e-mails da regua que falharam na entrega")
     ap.add_argument("--toques", default="d30,d15,d7,expirado")
     ap.add_argument("--limite", type=int, default=0, help="canario: envia no maximo N")
     ap.add_argument("--so-email", default="", help="restringe a um destinatario (teste)")
@@ -222,6 +270,11 @@ def main():
     print(f"  data de referencia: {hoje}  |  toques: {', '.join(toques)}")
 
     db = conectar()
+
+    if args.retentar:
+        retentar_falhas(db, args.apply)
+        return
+
     candidatos = coletar(db, hoje, toques)
     print(f"  projetos na janela: {len(candidatos)}")
 
@@ -274,12 +327,14 @@ def main():
                     "to": c["email"],
                     "createdAt": firestore.SERVER_TIMESTAMP,
                     "message": {"subject": assunto, "html": html},
+                    "origem": MARCA_ORIGEM,
                 })
                 db.collection(COL_CONTROLE).document(c["chave"]).set({
                     "projectId": c["project_id"], "toque": c["toque"],
                     "diasNoEnvio": c["dias"], "enviadoEm": firestore.SERVER_TIMESTAMP,
                 })
                 enviado = True
+                time.sleep(PAUSA_ENTRE_ENVIOS_S)
             print(f"    [{c['toque']:>8}] {c['dias']:>4}d  {mascarar(c['email']):<28} {c['titulo'][:44]}")
             print(f"               assunto: {assunto}")
             w.writerow([c["project_id"], c["toque"], c["dias"], c["data_exp"], c["status"],
