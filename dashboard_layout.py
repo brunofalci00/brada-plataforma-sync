@@ -20,7 +20,7 @@ card "Ativacao" (proxy ~100% por auto-login) trocado por "Total de novos".
 
 import datetime
 
-LAYOUT_VERSION = "v4"
+LAYOUT_VERSION = "v5"
 DASH_TITLE = "Dashboard"
 SENTINEL_CELL = "Z1"
 
@@ -75,8 +75,8 @@ MERGES = [
     "A4:H4",
     "A5:B6", "C5:D6", "E5:F6", "G5:H6",
     "A7:B7", "C7:D7", "E7:F7", "G7:H7",
-    "A8:B9", "C8:D9", "E8:F9",
-    "A10:B10", "C10:D10", "E10:F10",
+    "A8:B9", "C8:D9", "E8:F9", "G8:H9",
+    "A10:B10", "C10:D10", "E10:F10", "G10:H10",
     "A12:H12",
     "A13:B14", "C13:D14", "E13:F14", "G13:H14",
     "A15:B15", "C15:D15", "E15:F15", "G15:H15",
@@ -91,9 +91,9 @@ MERGES = [
 ]
 
 # Faixas de "card" (numero + label compartilham o fundo suave)
-CARD_BANDS = ["A5:H7", "A8:F10", "A13:H15", "A18:E20", "A23:H25"]
-NUMBER_RANGES = ["A5:H6", "A8:F9", "A13:H14", "A18:E19", "A23:H24"]
-LABEL_RANGES = ["A7:H7", "A10:F10", "A15:H15", "A20:E20", "A25:H25"]
+CARD_BANDS = ["A5:H7", "A8:H10", "A13:H15", "A18:E20", "A23:H25"]
+NUMBER_RANGES = ["A5:H6", "A8:H9", "A13:H14", "A18:E19", "A23:H24"]
+LABEL_RANGES = ["A7:H7", "A10:H10", "A15:H15", "A20:E20", "A25:H25"]
 HEADER_RANGES = ["A4:H4", "A12:H12", "A17:H17", "A22:H22"]
 PERCENT_RANGES = ["E13:F14", "G13:H14"]
 
@@ -259,13 +259,18 @@ def value_data(m, now_brt_naive):
         ("A1", [["Plataforma Brada — Visão Geral"]]),
         ("A2", [["Atualizado em"]]),
         ("D2", [[datetime_to_serial(now_brt_naive)]]),
-        ("A4", [["PROJETOS"]]),
+        # Rotulos auto-explicativos: em 04/08 a gerencia leu "Ativos" como
+        # "projetos cadastrados" e concluiu que os projetos estavam caindo.
+        # A aba nao mostrava o total, entao sobrava so numero ambiguo pra ler.
+        ("A4", [["PROJETOS — ESTOQUE E PRAZO DE CAPTAÇÃO"]]),
         ("A5", [[m["proj_ativos"]]]), ("C5", [[m["st_disponivel"]]]),
         ("E5", [[m["st_em_execucao"]]]), ("G5", [[m["st_rascunho"]]]),
-        ("A7", [["Ativos"]]), ("C7", [["Disponíveis"]]),
+        ("A7", [["Podem captar hoje"]]), ("C7", [["Disponíveis"]]),
         ("E7", [["Em Execução"]]), ("G7", [["Rascunhos"]]),
-        ("A8", [[m["exp_vigente"]]]), ("C8", [[m["exp_expirado"]]]), ("E8", [[m["exp_sem_data"]]]),
-        ("A10", [["CAC vigente"]]), ("C10", [["CAC expirado"]]), ("E10", [["CAC sem data"]]),
+        ("A8", [[m["exp_vigente"]]]), ("C8", [[m["exp_expirado"]]]),
+        ("E8", [[m["exp_sem_data"]]]), ("G8", [[m["proj_total"]]]),
+        ("A10", [["Dentro do prazo"]]), ("C10", [["Prazo vencido"]]),
+        ("E10", [["Sem prazo definido"]]), ("G10", [["Total cadastrado"]]),
         ("A12", [["MIGRAÇÃO — ANTIGA → NOVA"]]),
         ("A13", [[m["antiga_baseline"]]]), ("C13", [[m["mig_visiveis"]]]),
         ("E13", [[m["retencao_frac"]]]), ("G13", [[m["base_logou_frac"]]]),
@@ -274,7 +279,7 @@ def value_data(m, now_brt_naive):
         ("A17", [["PROPOSTAS APROVADAS"]]),
         ("A18", [[m["prop_aprovadas"]]]), ("C18", [[m["prop_valor"]]]),
         ("A20", [["Aprovadas"]]), ("C20", [["Valor aprovado"]]),
-        ("A22", [["CADASTROS NOVOS"]]),
+        ("A22", [["CADASTROS NOVOS — ENTRADA DE GENTE NOVA"]]),
         ("A23", [[m["novos_mes"]]]), ("C23", [[m["novos_mes_ant"]]]),
         ("E23", [[m["novos_total"]]]), ("G23", [[m["ativos_30d"]]]),
         ("A25", [["No mês"]]), ("C25", [["Mês anterior"]]),
