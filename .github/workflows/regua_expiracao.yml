@@ -1,0 +1,53 @@
+name: Regua de expiracao de projeto
+
+on:
+  schedule:
+    - cron: '0 11 * * *'  # 11:00 UTC = 08:00 BRT (diario)
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'dry-run (so lista) ou apply (envia)'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options: [dry-run, apply]
+      toques:
+        description: 'toques a processar'
+        required: false
+        default: 'd30,d15,d7,expirado'
+
+jobs:
+  regua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      # No agendado envia sempre; no manual respeita a escolha.
+      - name: Definir modo
+        id: modo
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.modo }}" = "apply" ]; then
+            echo "flag=--apply" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Regua de expiracao
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: python regua_expiracao.py ${{ steps.modo.outputs.flag }} --toques "${{ inputs.toques || 'd30,d15,d7,expirado' }}"
+
+      - name: Guardar log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regua-log
+          path: logs/regua_expiracao/
+          if-no-files-found: ignore
