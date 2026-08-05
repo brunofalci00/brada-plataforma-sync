@@ -20,7 +20,7 @@ card "Ativacao" (proxy ~100% por auto-login) trocado por "Total de novos".
 
 import datetime
 
-LAYOUT_VERSION = "v6.1"
+LAYOUT_VERSION = "v6.2"
 
 # Grade da aba e area gerenciada. Os dois andam juntos: AREA e o que o script
 # limpa, desmergia, formata e protege; GRID_ROWS e o tamanho fisico da aba.
@@ -113,18 +113,25 @@ MERGES = [
     # ATIVIDADE POR SEMANA (57-65): tabela em A:B + sparkline em C:H
     "A57:H57",
     "C58:H65",
+    # COMUNICACAO (67-70): as reguas mandaram 265 e-mails em dois dias e a aba
+    # nao mostrava nenhum. Cabe na area gerenciada atual (A1:H70) sem crescer.
+    "A67:H67",
+    "A68:B69", "C68:D69", "E68:F69", "G68:H69",
+    "A70:B70", "C70:D70", "E70:F70", "G70:H70",
 ]
 
 # Faixas de "card" (numero + label compartilham o fundo suave)
 CARD_BANDS = ["A5:H7", "A8:H10", "A13:H15", "A18:E20", "A23:H25",
-              "A38:D40", "A43:H45", "A48:H50", "A53:H55"]
+              "A38:D40", "A43:H45", "A48:H50", "A53:H55", "A68:H70"]
 NUMBER_RANGES = ["A5:H6", "A8:H9", "A13:H14", "A18:E19", "A23:H24",
-                 "A38:D39", "A43:H44", "A48:H49", "A53:H54"]
+                 "A38:D39", "A43:H44", "A48:H49", "A53:H54", "A68:H69"]
 LABEL_RANGES = ["A7:H7", "A10:H10", "A15:H15", "A20:E20", "A25:H25",
-                "A40:D40", "A45:H45", "A50:H50", "A55:H55"]
+                "A40:D40", "A45:H45", "A50:H50", "A55:H55", "A70:H70"]
 HEADER_RANGES = ["A4:H4", "A12:H12", "A17:H17", "A22:H22",
-                 "A37:H37", "A42:H42", "A47:H47", "A52:H52"]
-PERCENT_RANGES = ["E13:F14", "G13:H14"]
+                 "A37:H37", "A42:H42", "A47:H47", "A52:H52", "A67:H67"]
+# Percentual precisa de FRACAO na celula: escrever 5 com formato de % vira
+# 500,0%. Foi bug real na v6 e o reset visual nao limpa numberFormat sozinho.
+PERCENT_RANGES = ["E13:F14", "G13:H14", "E68:F69", "G68:H69"]
 
 
 def _fmt(range_, cell_format, fields):
@@ -359,6 +366,14 @@ def value_data(m, now_brt_naive):
 
         ("A57", [["ATIVIDADE POR SEMANA — usuários ativos nos últimos 30 dias"]]),
         ("A58", [[lbl, n] for lbl, n in m["semanas_ativos"]]),
+        # A plataforma passou a falar com o usuario em 04/08. Estes quatro
+        # numeros respondem, nesta ordem: passou a falar, esta falando agora,
+        # esta chegando, esta funcionando.
+        ("A67", [["COMUNICAÇÃO — E-MAILS PARA O USUÁRIO"]]),
+        ("A68", [[m["mail_total"]]]), ("C68", [[m["mail_7d"]]]),
+        ("E68", [[m["mail_entrega_frac"]]]), ("G68", [[m["mail_voltaram_frac"]]]),
+        ("A70", [["E-mails enviados"]]), ("C70", [["Nos últimos 7 dias"]]),
+        ("E70", [["Taxa de entrega"]]), ("G70", [["Voltaram depois do e-mail"]]),
     ]
     return [{"range": f"{DASH_TITLE}!{rng}", "values": vals} for rng, vals in d]
 
