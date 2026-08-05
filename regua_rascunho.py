@@ -50,8 +50,12 @@ CAMPOS_OBRIGATORIOS = [
     ("ods", "ODS"),
     ("fundingSource", "Fonte de recurso"),
     ("cacExpirationDate", "Prazo final de captação"),
-    ("diarioOficialUrl", "Arquivo do Diário Oficial"),
 ]
+# O Diario Oficial fica fora da lista porque tem DOIS campos possiveis: o front
+# aceita qualquer um dos dois (Projects.tsx:496). Hoje `existingDiarioOficialUrl`
+# esta vazio nos 638 projetos, entao a diferenca e zero — mas checar so um campo
+# faria a gente escrever "falta o Diario Oficial" pra quem ja anexou.
+CAMPOS_DIARIO = ("diarioOficialUrl", "existingDiarioOficialUrl")
 
 
 def vazio(v):
@@ -69,6 +73,8 @@ def campos_faltando(p: dict):
     alvo = p.get("targetAudience") or []
     if isinstance(alvo, list) and "Outros" in alvo and vazio(p.get("targetAudienceOther")):
         falta.append('Especificação do público-alvo "Outros"')
+    if all(vazio(p.get(c)) for c in CAMPOS_DIARIO):
+        falta.append("Arquivo do Diário Oficial")
     return falta
 
 
