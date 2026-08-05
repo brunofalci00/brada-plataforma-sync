@@ -29,7 +29,10 @@ from regua_expiracao import (
     conectar, mascarar, _primeiro_nome,
     PAUSA_ENTRE_ENVIOS_S, PLATAFORMA_URL,
 )
-from filtros import e_texto_de_teste, motivo_exclusao, exigir_checagem_supressao
+from filtros import (
+    e_texto_de_teste, motivo_exclusao, exigir_checagem_supressao,
+    registrar_supressao, motivo_ja_resolvido,
+)
 
 COL_CONTROLE = "regua_rascunho_envios"
 # Marca propria: sem isso os e-mails desta regua entram na colecao `mail`
@@ -220,8 +223,10 @@ def main():
     print(f"  donos com projeto em Rascunho: {len(por_dono)}")
     print(f"  projetos em Rascunho: {sum(len(v['projetos']) for v in por_dono.values())}")
 
-    ja = {d.id for d in db.collection(COL_CONTROLE).stream()}
-    print(f"  envios ja registrados: {len(ja)}")
+    controle = {d.id: (d.to_dict() or {}) for d in db.collection(COL_CONTROLE).stream()}
+    n_env = sum(1 for r in controle.values() if not r.get("suprimido"))
+    print(f"  ja resolvidos: {len(controle)} ({n_env} enviados, "
+          f"{len(controle) - n_env} descadastrados)")
 
     token = carregar_token_leadlovers() if args.checar_supressao else ""
     if args.checar_supressao and not token:
@@ -232,8 +237,8 @@ def main():
         pulados[motivo] = pulados.get(motivo, 0) + 1
 
     for dono_id, reg in por_dono.items():
-        if dono_id in ja:
-            pular("ja enviado"); continue
+        if dono_id in controle:
+            pular(motivo_ja_resolvido(controle[dono_id])); continue
         motivo = motivo_exclusao(reg["email"], reg["nome"])
         if motivo:
             pular(motivo); continue
@@ -263,6 +268,9 @@ def main():
             s = esta_suprimido(reg["email"], token)
             if s is True:
                 pular("descadastrado (LGPD)")
+                # So grava no modo real: dry-run nao escreve nada no Firestore.
+                if args.apply:
+                    registrar_supressao(db, COL_CONTROLE, reg["id"])
             elif s is None:
                 indefinidos += 1
                 pular("supressao indefinida (API nao respondeu)")

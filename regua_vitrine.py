@@ -42,7 +42,7 @@ from regua_expiracao import (
 from regua_rascunho import campos_faltando, carregar_token_leadlovers, esta_suprimido
 from filtros import (
     e_texto_de_teste, motivo_exclusao, indice_login, dias_desde_login, uids_tocados,
-    exigir_checagem_supressao,
+    exigir_checagem_supressao, registrar_supressao, motivo_ja_resolvido,
 )
 
 COL_CONTROLE = "regua_vitrine_envios"
@@ -249,9 +249,12 @@ def main():
     print(f"    com projeto incompleto: {sum(1 for r in por_dono.values() if r['incompletos'])}")
     print(f"    so com projeto completo: {sum(1 for r in por_dono.values() if not r['incompletos'])}")
 
-    ja = {d.id for d in db.collection(COL_CONTROLE).stream()}
+    controle = {d.id: (d.to_dict() or {}) for d in db.collection(COL_CONTROLE).stream()}
+    n_env = sum(1 for r in controle.values() if not r.get("suprimido"))
     tocados = uids_tocados(db, hoje=hoje, dono_de_projeto=dono_de_projeto)
-    print(f"  envios ja registrados: {len(ja)}   |   tocados por outra regua (14d): {len(tocados)}")
+    print(f"  ja resolvidos: {len(controle)} ({n_env} enviados, "
+          f"{len(controle) - n_env} descadastrados)   |   "
+          f"tocados por outra regua (14d): {len(tocados)}")
 
     token = carregar_token_leadlovers() if args.checar_supressao else ""
     if args.checar_supressao and not token:
@@ -262,8 +265,8 @@ def main():
         pulados[motivo] = pulados.get(motivo, 0) + 1
 
     for dono_id, reg in por_dono.items():
-        if dono_id in ja:
-            pular("ja enviado"); continue
+        if dono_id in controle:
+            pular(motivo_ja_resolvido(controle[dono_id])); continue
         if dono_id in tocados:
             pular(f"tocado por {tocados[dono_id]}"); continue
         motivo = motivo_exclusao(reg["email"], reg["nome"])
@@ -291,6 +294,9 @@ def main():
             s = esta_suprimido(reg["email"], token)
             if s is True:
                 pular("descadastrado (LGPD)")
+                # So grava no modo real: dry-run nao escreve nada no Firestore.
+                if args.apply:
+                    registrar_supressao(db, COL_CONTROLE, reg["id"])
             elif s is None:
                 indefinidos += 1
                 pular("supressao indefinida (API nao respondeu)")

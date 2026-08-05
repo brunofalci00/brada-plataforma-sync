@@ -134,6 +134,32 @@ def _dias_desde(ts, hoje: dt.date):
     return (hoje - d).days
 
 
+def registrar_supressao(db, colecao: str, uid: str):
+    """
+    Grava o descadastro na colecao de controle da regua.
+
+    Sem isto, quem pede descadastro NUNCA sai da fila: nao entra na colecao de
+    controle (porque nunca recebeu nada), entao aparece em toda execucao e e
+    reconsultado no LeadLovers de novo. A regua da vitrine tinha 49 pessoas
+    nessa situacao — com cron semanal viraria 49 chamadas de API por semana,
+    para sempre, sem nenhum efeito.
+
+    O documento vai de proposito SEM `enviadoEm`: `uids_tocados` so conta quem
+    tem essa data, entao o dedup entre reguas continua enxergando so quem
+    realmente recebeu e-mail.
+    """
+    from google.cloud import firestore
+    db.collection(colecao).document(uid).set({
+        "suprimido": True,
+        "checadoEm": firestore.SERVER_TIMESTAMP,
+    })
+
+
+def motivo_ja_resolvido(registro: dict) -> str:
+    """Por que esta pessoa ja saiu da fila: envio anterior ou descadastro."""
+    return "descadastrado (registrado)" if (registro or {}).get("suprimido") else "ja enviado"
+
+
 def exigir_checagem_supressao(args):
     """
     Barra `--apply` sem checagem de descadastro nas reguas de campanha.

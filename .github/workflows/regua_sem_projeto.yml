@@ -1,0 +1,67 @@
+name: Regua dos sem projeto
+
+# Quem tem conta e nenhum projeto cadastrado: os 2 com projeto vigente que
+# ficou fora da plataforma nova, e quem acessou e nunca cadastrou.
+#
+# Regenera ~14 pessoas por mes (medido em 05/08), entao semanal da conta.
+#
+# Precisa de GOOGLE_SERVICE_ACCOUNT_JSON alem do Firebase: le a planilha da
+# plataforma antiga pra saber quem tinha projeto la (fonte_antiga).
+#
+# Quinta, longe da vitrine (terca) e da expiracao (todo dia, 11:00). Duas
+# reguas enviando junto quebram a pausa de 8s de cada uma.
+
+on:
+  schedule:
+    - cron: '0 13 * * 4'  # quintas, 13:00 UTC = 10:00 BRT
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'dry-run (so lista) ou apply (envia)'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options: [dry-run, apply]
+      limite:
+        description: 'teto de envios por execucao'
+        required: false
+        default: '30'
+
+jobs:
+  regua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Definir modo
+        id: modo
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.modo }}" = "apply" ]; then
+            echo "flag=--apply" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Regua dos sem projeto
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          LEADLOVERS_TOKEN: ${{ secrets.LEADLOVERS_TOKEN }}
+        run: >-
+          python regua_sem_projeto.py ${{ steps.modo.outputs.flag }}
+          --checar-supressao --limite ${{ inputs.limite || '30' }}
+
+      - name: Guardar log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regua-sem-projeto-log
+          path: logs/regua_sem_projeto/
+          if-no-files-found: ignore
