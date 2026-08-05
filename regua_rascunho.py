@@ -238,10 +238,15 @@ def main():
         fila = fila[:args.limite]
 
     if args.checar_supressao:
-        print(f"\n  checando descadastro no LeadLovers ({len(fila)} e-mails)...")
+        total = len(fila)
+        # Uma consulta por e-mail, sequencial: leva minutos. Sem progresso a
+        # execucao parece travada — e ai a tentacao e matar o processo.
+        print(f"\n  checando descadastro no LeadLovers ({total} e-mails, "
+              f"~{max(1, round(total * 0.6 / 60))} min)...")
+        print("  nada foi enviado ainda; cancelar aqui e seguro.")
         limpa = []
         indefinidos = 0
-        for reg in fila:
+        for i, reg in enumerate(fila, start=1):
             s = esta_suprimido(reg["email"], token)
             if s is True:
                 pular("descadastrado (LGPD)")
@@ -250,6 +255,9 @@ def main():
                 pular("supressao indefinida (API nao respondeu)")
             else:
                 limpa.append(reg)
+            if i % 25 == 0 or i == total:
+                print(f"    {i}/{total} checados · {len(limpa)} liberados · "
+                      f"{i - len(limpa) - indefinidos} descadastrados", flush=True)
             time.sleep(0.3)
         fila = limpa
         if indefinidos:
