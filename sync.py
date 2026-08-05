@@ -124,6 +124,8 @@ HEADER_PROJECTS = [
     "data_expiracao_cac", "expiracao_situacao",
     "ods_principal", "n_ods", "uf", "budget_valor", "budget_faixa",
     "dados_em_atualizacao",
+    # No fim de proposito: fonte do Looker so ganha campo, nao quebra.
+    "n_campos_faltando", "campos_faltando",
 ]
 
 HEADER_PROPOSALS = [
@@ -359,22 +361,42 @@ def load_collection(db, name):
 # BUILD DAS ABAS
 # ===================================================
 
-# Espelha isProjectComplete do front (brada-plataforma-v3 Projects.tsx:372) e a
-# porta de sync_outreach_rascunho. Inline aqui pra evitar import circular
-# (sync_outreach_rascunho importa este modulo).
-PROJ_CAMPOS_OBRIG = ("title", "budget", "startDate", "description", "targetAudience",
-                     "location", "category", "fundingSource", "cacExpirationDate")
+# Espelha isProjectComplete do front (brada-plataforma-v3 Projects.tsx:474-492).
+# Este modulo e a FONTE UNICA da regra: sync_outreach_rascunho e as reguas de
+# e-mail importam daqui. Se a lista divergir entre planilha e e-mail, a Tamyris
+# ve um numero e o proponente recebe outro.
+# Rotulos sao os do formulario, porque vao direto pro e-mail e pro dashboard.
+PROJ_CAMPOS = [
+    ("title", "Nome do projeto"),
+    ("description", "Descrição"),
+    ("budget", "Orçamento estimado"),
+    ("startDate", "Data de início"),
+    ("category", "Categoria"),
+    ("targetAudience", "Público-alvo"),
+    ("location", "Localização"),
+    ("fundingSource", "Fonte de recurso"),
+    ("cacExpirationDate", "Prazo final de captação"),
+]
+# Compatibilidade: consumidores antigos esperam so as chaves.
+PROJ_CAMPOS_OBRIG = tuple(k for k, _ in PROJ_CAMPOS)
+
+
+def campos_faltando(d):
+    """Rotulos dos campos que faltam pro projeto poder ser publicado."""
+    falta = [rotulo for chave, rotulo in PROJ_CAMPOS if not d.get(chave)]
+    ods = d.get("ods")
+    if not (ods and (len(ods) > 0 if isinstance(ods, list) else True)):
+        falta.append("ODS")
+    if not (d.get("diarioOficialUrl") or d.get("existingDiarioOficialUrl")):
+        falta.append("Arquivo do Diário Oficial")
+    alvo = d.get("targetAudience") or []
+    if isinstance(alvo, list) and "Outros" in alvo and not str(d.get("targetAudienceOther") or "").strip():
+        falta.append('Especificação do público-alvo "Outros"')
+    return falta
 
 
 def projeto_incompleto(d):
-    if not all(d.get(k) for k in PROJ_CAMPOS_OBRIG):
-        return True
-    ods = d.get("ods")
-    if not (ods and (len(ods) > 0 if isinstance(ods, list) else True)):
-        return True
-    if not (d.get("diarioOficialUrl") or d.get("existingDiarioOficialUrl")):
-        return True
-    return False
+    return bool(campos_faltando(d))
 
 
 def build_projects(projects_raw, users_by_id, today_str, issues):
@@ -403,7 +425,8 @@ def build_projects(projects_raw, users_by_id, today_str, issues):
         budget = parse_budget_brl(d.get("budget"))
         # selo "dados em atualizacao" = publicado (Disponivel) mas ainda incompleto.
         # Base honesta da segmentacao (burn-down conforme o dono completa).
-        selo = sim_nao(status == "Disponível" and projeto_incompleto(d))
+        faltando = campos_faltando(d)
+        selo = sim_nao(status == "Disponível" and bool(faltando))
         row = [
             hash_id(doc_id),
             data_criacao,
@@ -420,6 +443,8 @@ def build_projects(projects_raw, users_by_id, today_str, issues):
             budget,
             budget_faixa(budget),
             selo,
+            len(faltando),
+            " | ".join(faltando),
         ]
         rows.append(row)
         if owner_id:
@@ -741,6 +766,36 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
         add("migracao_donos_ativos_logaram", "total", mig["donos_ativos_total"])
     return snap
 
+def serie_semanal(snap_all, metrica, now_brt, segmento="(todos)"):
+    """Ultimo valor de `metrica` em cada uma das 8 ultimas semanas (seg-dom).
+
+    Le do historico do snap_diario porque nao da pra reconstruir retroativamente:
+    `data_ultimo_login` guarda so o ultimo acesso, entao recalcular semanas
+    passadas a partir dele subconta. Semana sem snapshot vira 0.
+    """
+    por_data = {}
+    for r in snap_all:
+        if len(r) < 4 or str(r[1]).strip() != metrica:
+            continue
+        if segmento and str(r[2]).strip() != segmento:
+            continue
+        por_data[str(r[0]).strip()] = r[3]
+
+    monday = now_brt.date() - datetime.timedelta(days=now_brt.weekday())
+    out = []
+    for i in range(7, -1, -1):
+        ini = monday - datetime.timedelta(weeks=i)
+        fim = ini + datetime.timedelta(days=7)
+        dentro = [d for d in por_data if ini.isoformat() <= d < fim.isoformat()]
+        bruto = por_data[max(dentro)] if dentro else 0
+        try:
+            valor = int(float(bruto))
+        except (TypeError, ValueError):
+            valor = 0
+        out.append((ini.strftime("%d/%m"), valor))
+    return out
+
+
 def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt):
     """Agregados pra aba Dashboard (consumo humano direto). Mesma fonte de
     verdade em memoria das raw_* — impossivel divergir."""
@@ -756,6 +811,33 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     ativos = sum(1 for r in projects_rows
                  if r[p["status"]] in ("Disponível", "Em Execução")
                  and r[p["expiracao_situacao"]] != "expirado")
+
+    # --- Coorte de expiracao: o que vence quando (cumulativo) ---------------
+    # Mesmo universo de `ativos`, pra a coorte falar dos mesmos projetos do card
+    # de cima. O filtro por "vigente" e obrigatorio: sem ele, projeto sem data
+    # entra como "" e a comparacao de string da falso positivo.
+    hoje_iso = now_brt.date().isoformat()
+
+    def vencem_ate(dias):
+        limite = (now_brt.date() + datetime.timedelta(days=dias)).isoformat()
+        return sum(1 for r in projects_rows
+                   if r[p["status"]] in ("Disponível", "Em Execução")
+                   and r[p["expiracao_situacao"]] == "vigente"
+                   and hoje_iso <= r[p["data_expiracao_cac"]] <= limite)
+
+    # --- Funil do proponente ------------------------------------------------
+    # So ONG: investidor e admin nao fazem parte deste funil.
+    # "Publicou" = status != Rascunho, a mesma regua de mig_visiveis. Nao criar
+    # uma terceira definicao de publicado.
+    ongs = [r for r in users_rows if r[u["role"]] == "ONG"]
+    donos_publicados = {r[p["owner_hash"]] for r in projects_rows
+                        if r[p["status"]] != "Rascunho" and r[p["owner_hash"]]}
+
+    # --- Rascunhos: o que trava --------------------------------------------
+    rascunhos = [r for r in projects_rows if r[p["status"]] == "Rascunho"]
+
+    def rasc_sem(rotulo):
+        return sum(1 for r in rascunhos if rotulo in r[p["campos_faltando"]])
 
     novos = [r for r in users_rows if r[u["is_migrado"]] == "nao"]
     mes = now_brt.strftime("%Y-%m")
@@ -790,6 +872,18 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "exp_vigente": exp.get("vigente", 0),
         "exp_expirado": exp.get("expirado", 0),
         "exp_sem_data": exp.get("sem_data", 0),
+        "vence_30d": vencem_ate(30),
+        "vence_60d": vencem_ate(60),
+        "vence_90d": vencem_ate(90),
+        "vence_180d": vencem_ate(180),
+        "funil_cadastraram": len(ongs),
+        "funil_acessaram": sum(1 for r in ongs if r[u["logou_alguma_vez"]] == "sim"),
+        "funil_com_projeto": sum(1 for r in ongs if r[u["tem_projeto"]] == "sim"),
+        "funil_publicaram": sum(1 for r in ongs if r[u["user_hash"]] in donos_publicados),
+        "rasc_sem_diario": rasc_sem("Arquivo do Diário Oficial"),
+        "rasc_sem_descricao": rasc_sem("Descrição"),
+        "rasc_sem_orcamento": rasc_sem("Orçamento estimado"),
+        "rasc_perto": sum(1 for r in rascunhos if 0 < int(r[p["n_campos_faltando"]] or 0) <= 3),
         "prop_aprovadas": sum(1 for r in proposals_rows if r[q["status"]].lower() == "aprovado"),
         "prop_valor": round(sum(r[q["valor_aprovado"]] for r in proposals_rows
                                 if r[q["status"]].lower() == "aprovado"
@@ -895,6 +989,9 @@ def write_snapshot_idempotente(sh, snap_rows, today_str):
     ws.update(values=[HEADER_SNAP] + all_rows, range_name="A1")
     print(f"  snap_diario: {len(snap_rows)} linhas de {today_str} "
           f"(+{len(kept)} historicas preservadas)")
+    # Devolve o historico mesclado: e a unica fonte da serie semanal do dashboard,
+    # e esta e a unica leitura do snap_diario no sync (evita uma segunda ida ao Sheets).
+    return all_rows
 
 
 def write_leads_dedup(sh, header, new_rows):
@@ -1020,6 +1117,10 @@ def main():
     now_brt = datetime.datetime.now(BRT)
     metrics = compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt)
     metrics.update(mig_metrics)  # bloco MIGRACAO da aba Dashboard
+    # Serie semanal: fallback so com o snapshot de hoje (dry-run e seguranca contra
+    # KeyError em value_data). E sobrescrita logo apos a escrita do snap_diario,
+    # que devolve o historico completo.
+    metrics["semanas_ativos"] = serie_semanal(snap_rows, "users_ativos_30d", now_brt)
 
     if args.dry_run:
         u = {h: i for i, h in enumerate(HEADER_USERS)}
@@ -1057,7 +1158,8 @@ def main():
     write_overwrite(sh, "raw_projects", HEADER_PROJECTS, projects_rows)
     write_overwrite(sh, "raw_proposals", HEADER_PROPOSALS, proposals_rows)
     write_overwrite(sh, "raw_migracao_projetos", HEADER_MIGRACAO, mig_rows)
-    write_snapshot_idempotente(sh, snap_rows, today_str)
+    snap_historico = write_snapshot_idempotente(sh, snap_rows, today_str)
+    metrics["semanas_ativos"] = serie_semanal(snap_historico, "users_ativos_30d", now_brt)
     write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
     # Leads da Automatize (append+dedup). Externo -> nao aborta o sync; se None
     # (falha/sem token/PII) a aba fica intocada, preservando o historico.
