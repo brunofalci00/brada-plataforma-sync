@@ -902,6 +902,88 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
 
 
 # ===================================================
+# COMUNICACAO COM O USUARIO (reguas de e-mail)
+# ===================================================
+
+# Controle por PESSOA. A regua de expiracao fica de fora porque a chave dela e
+# por projeto ({projectId}__{toque}) e precisa do mapa projeto -> dono.
+CONTROLES_POR_PESSOA = ("regua_rascunho_envios", "regua_vitrine_envios",
+                        "regua_sem_projeto_envios")
+CONTROLE_POR_PROJETO = "regua_expiracao_envios"
+
+
+def _ts_ms(v):
+    """Timestamp do Firestore, datetime ou ISO -> milissegundos. None se nao der."""
+    if v is None:
+        return None
+    try:
+        if hasattr(v, "timestamp"):
+            return int(v.timestamp() * 1000)
+        return int(datetime.datetime.fromisoformat(str(v)[:19]).timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def metricas_email(db, login_index, dono_de_projeto, now_brt):
+    """
+    Indicadores da comunicacao com o usuario.
+
+    Existe porque as reguas mandaram 265 e-mails em dois dias e a planilha nao
+    mostrava nenhum: quem abria a aba nao via que a plataforma passou a falar
+    com o usuario, nem se estava funcionando.
+
+    PII: so contagens saem daqui. O campo `to` da colecao `mail` nao entra em
+    nenhuma variavel que chegue a planilha.
+    """
+    corte_7d = int((now_brt - datetime.timedelta(days=7)).timestamp() * 1000)
+
+    total = recentes = ok = erro = 0
+    for d in db.collection("mail").stream():
+        m = d.to_dict() or {}
+        total += 1
+        ms = _ts_ms(m.get("createdAt"))
+        if ms is not None and ms >= corte_7d:
+            recentes += 1
+        estado = str((m.get("delivery") or {}).get("state") or "")
+        if estado == "SUCCESS":
+            ok += 1
+        elif estado == "ERROR" and not m.get("retentadoEm"):
+            # Documento com `retentadoEm` ja foi reenviado e o reenvio virou
+            # outro documento, que conta no SUCCESS. Contar os dois seria
+            # penalizar a taxa por uma falha que a retentativa ja resolveu:
+            # hoje sao 49 erros, TODOS reenviados, e a taxa real e 100%.
+            erro += 1
+
+    # uid -> primeiro envio. Documento sem `enviadoEm` e registro de
+    # descadastro (filtros.registrar_supressao), nao envio: nao conta.
+    primeiro_envio = {}
+    def marcar(uid, ms):
+        if uid and ms is not None:
+            anterior = primeiro_envio.get(uid)
+            primeiro_envio[uid] = ms if anterior is None else min(anterior, ms)
+
+    for col in CONTROLES_POR_PESSOA:
+        for d in db.collection(col).stream():
+            marcar(d.id, _ts_ms((d.to_dict() or {}).get("enviadoEm")))
+    for d in db.collection(CONTROLE_POR_PROJETO).stream():
+        x = d.to_dict() or {}
+        pid = x.get("projectId") or d.id.split("__")[0]
+        marcar(dono_de_projeto.get(pid), _ts_ms(x.get("enviadoEm")))
+
+    # Voltou = ultimo acesso no Auth e POSTERIOR ao primeiro e-mail que mandamos.
+    voltaram = sum(1 for uid, ms in primeiro_envio.items()
+                   if (login_index.get(uid) or 0) > ms)
+
+    return {
+        "mail_total": total,
+        "mail_7d": recentes,
+        "mail_entrega_frac": round(ok / (ok + erro), 4) if (ok + erro) else 0,
+        "mail_voltaram_frac": (round(voltaram / len(primeiro_envio), 4)
+                               if primeiro_envio else 0),
+    }
+
+
+# ===================================================
 # GUARD ANTI-PII (pre-publicacao)
 # ===================================================
 
@@ -1116,6 +1198,14 @@ def main():
 
     now_brt = datetime.datetime.now(BRT)
     metrics = compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt)
+    # Comunicacao: le a colecao `mail` e as colecoes de controle das reguas.
+    # Fica fora de compute_dashboard_metrics porque aquela funcao trabalha em
+    # cima das linhas ja montadas e nao tem acesso ao Firestore.
+    metrics.update(metricas_email(
+        db, login_index,
+        {doc_id: str(d.get("ownerId") or "") for doc_id, d in projects_raw},
+        now_brt,
+    ))
     metrics.update(mig_metrics)  # bloco MIGRACAO da aba Dashboard
     # Serie semanal: fallback so com o snapshot de hoje (dry-run e seguranca contra
     # KeyError em value_data). E sobrescrita logo apos a escrita do snap_diario,
