@@ -52,9 +52,16 @@ MARCA_ORIGEM = "regua_expiracao"
 # auditar "quantos e-mails a regua X mandou" e o que a retentativa varre.
 MARCAS_REGUA = ("regua_expiracao", "regua_rascunho")
 
-# O Gmail devolve 421-4.3.0 quando recebe uma rajada do mesmo remetente.
-# Espacar os envios evita a falha, que e o que aconteceu no 1o disparo (4 de 31).
-PAUSA_ENTRE_ENVIOS_S = 1.5
+# RITMO DE ENVIO — aprendido na pratica, em dois disparos reais:
+#   31 e-mails a 0s   -> 4 falharam com 421-4.3.0 (Temporary System Problem)
+#  125 e-mails a 1,5s -> 45 falharam com 454-4.7.0 (Too many login attempts)
+#
+# A extensao `firestore-send-email` dispara no WRITE do documento e faz um login
+# SMTP por mensagem. Ou seja: o intervalo entre as ESCRITAS e o que vira o
+# intervalo entre os ENVIOS. Nao existe outra alavanca do nosso lado.
+# 8s da ~7 e-mails/min, abaixo do limite de login do Gmail. Um lote de 125 leva
+# uns 17 minutos, o que e aceitavel para uma regua que roda sozinha.
+PAUSA_ENTRE_ENVIOS_S = 8.0
 
 # Dominios e enderecos internos: nunca recebem a regua.
 DOMINIOS_INTERNOS = ("@brada.social", "@somosbrada.com.br")
@@ -213,7 +220,7 @@ def coletar(db, hoje, toques):
 # --------------------------------------------------------------------------- #
 # Execucao
 # --------------------------------------------------------------------------- #
-def retentar_falhas(db, aplicar: bool) -> int:
+def retentar_falhas(db, aplicar: bool, pausa: float = None, lote: int = 0) -> int:
     """
     Reenfileira os e-mails da regua que a extensao marcou como ERROR.
 
@@ -237,11 +244,19 @@ def retentar_falhas(db, aplicar: bool) -> int:
         if e_da_regua and x.get("to"):
             candidatos.append((d, x))
 
-    print(f"\n=== RETENTATIVA: {len(candidatos)} e-mail(s) com falha de entrega ===")
-    for d, x in candidatos:
+    pausa = PAUSA_ENTRE_ENVIOS_S if pausa is None else pausa
+    total = len(candidatos)
+    if lote:
+        candidatos = candidatos[:lote]
+
+    print(f"\n=== RETENTATIVA: {total} e-mail(s) com falha de entrega ===")
+    if aplicar and candidatos:
+        print(f"    reenfileirando {len(candidatos)} a cada {pausa}s "
+              f"(~{max(1, round(len(candidatos) * pausa / 60))} min)")
+    for i, (d, x) in enumerate(candidatos, start=1):
         msg = x.get("message") or {}
         erro = str((x.get("delivery") or {}).get("error") or "")[:70]
-        print(f"    {mascarar(x.get('to')):<28} {str(msg.get('subject'))[:44]}")
+        print(f"    {mascarar(x.get('to')):<28} {str(msg.get('subject'))[:44]}", flush=True)
         print(f"        motivo: {erro}")
         if aplicar:
             db.collection("mail").add({
@@ -251,9 +266,12 @@ def retentar_falhas(db, aplicar: bool) -> int:
                 "origem": MARCA_ORIGEM,
             })
             d.reference.update({"retentadoEm": firestore.SERVER_TIMESTAMP})
-            time.sleep(PAUSA_ENTRE_ENVIOS_S)
+            if i < len(candidatos):
+                time.sleep(pausa)
     if not aplicar and candidatos:
         print("    DRY-RUN: nada reenfileirado. Use --apply.")
+    if lote and total > lote:
+        print(f"    restam {total - lote} para o proximo run (--lote {lote})")
     return len(candidatos)
 
 
@@ -262,6 +280,10 @@ def main():
     ap.add_argument("--apply", action="store_true", help="envia de verdade (padrao e dry-run)")
     ap.add_argument("--retentar", action="store_true",
                     help="reenfileira so os e-mails da regua que falharam na entrega")
+    ap.add_argument("--pausa", type=float, default=None,
+                    help=f"segundos entre envios (padrao {PAUSA_ENTRE_ENVIOS_S})")
+    ap.add_argument("--lote", type=int, default=0,
+                    help="processa no maximo N por execucao (util apos throttle)")
     ap.add_argument("--toques", default="d30,d15,d7,expirado")
     ap.add_argument("--limite", type=int, default=0, help="canario: envia no maximo N")
     ap.add_argument("--so-email", default="", help="restringe a um destinatario (teste)")
@@ -278,7 +300,7 @@ def main():
     db = conectar()
 
     if args.retentar:
-        retentar_falhas(db, args.apply)
+        retentar_falhas(db, args.apply, pausa=args.pausa, lote=args.lote)
         return
 
     candidatos = coletar(db, hoje, toques)
@@ -340,7 +362,7 @@ def main():
                     "diasNoEnvio": c["dias"], "enviadoEm": firestore.SERVER_TIMESTAMP,
                 })
                 enviado = True
-                time.sleep(PAUSA_ENTRE_ENVIOS_S)
+                time.sleep(PAUSA_ENTRE_ENVIOS_S if args.pausa is None else args.pausa)
             print(f"    [{c['toque']:>8}] {c['dias']:>4}d  {mascarar(c['email']):<28} {c['titulo'][:44]}")
             print(f"               assunto: {assunto}")
             w.writerow([c["project_id"], c["toque"], c["dias"], c["data_exp"], c["status"],
