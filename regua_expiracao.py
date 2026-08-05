@@ -55,7 +55,8 @@ COL_CONTROLE = "regua_expiracao_envios"
 MARCA_ORIGEM = "regua_expiracao"
 # Toda regua que escreve na colecao `mail` se declara aqui. E o que permite
 # auditar "quantos e-mails a regua X mandou" e o que a retentativa varre.
-MARCAS_REGUA = ("regua_expiracao", "regua_rascunho", "regua_vitrine")
+MARCAS_REGUA = ("regua_expiracao", "regua_rascunho", "regua_vitrine",
+                "regua_sem_projeto")
 
 # RITMO DE ENVIO — aprendido na pratica, em dois disparos reais:
 #   31 e-mails a 0s   -> 4 falharam com 421-4.3.0 (Temporary System Problem)

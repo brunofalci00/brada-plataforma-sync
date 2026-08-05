@@ -42,6 +42,7 @@ from regua_expiracao import (
 from regua_rascunho import campos_faltando, carregar_token_leadlovers, esta_suprimido
 from filtros import (
     e_texto_de_teste, motivo_exclusao, indice_login, dias_desde_login, uids_tocados,
+    exigir_checagem_supressao,
 )
 
 COL_CONTROLE = "regua_vitrine_envios"
@@ -227,8 +228,11 @@ def main():
     ap.add_argument("--pausa", type=float, default=None)
     ap.add_argument("--checar-supressao", action="store_true",
                     help="consulta o LeadLovers e pula quem pediu descadastro (412)")
+    ap.add_argument("--sem-checagem", action="store_true",
+                    help="dispara sem consultar o descadastro (saida de emergencia)")
     ap.add_argument("--hoje", default="", help="simula outra data, AAAA-MM-DD")
     args = ap.parse_args()
+    exigir_checagem_supressao(args)
 
     hoje = dt.date.fromisoformat(args.hoje) if args.hoje else dt.date.today()
     pausa = PAUSA_ENTRE_ENVIOS_S if args.pausa is None else args.pausa
