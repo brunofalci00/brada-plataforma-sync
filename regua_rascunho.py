@@ -27,10 +27,14 @@ from google.cloud import firestore
 
 from regua_expiracao import (
     conectar, mascarar, e_interno, _primeiro_nome,
-    MARCA_ORIGEM, PAUSA_ENTRE_ENVIOS_S, PLATAFORMA_URL,
+    PAUSA_ENTRE_ENVIOS_S, PLATAFORMA_URL,
 )
 
 COL_CONTROLE = "regua_rascunho_envios"
+# Marca propria: sem isso os e-mails desta regua entram na colecao `mail`
+# rotulados como "regua_expiracao", e qualquer auditoria por regua vira soma
+# errada. Precisa estar em MARCAS_REGUA (regua_expiracao.py) pra retentativa ver.
+MARCA_ORIGEM = "regua_rascunho"
 
 # Espelha isProjectComplete (src/pages/ong/Projects.tsx:474-492).
 # A ordem importa: e a ordem em que a pessoa ve no formulario.

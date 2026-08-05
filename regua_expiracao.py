@@ -48,6 +48,9 @@ def conectar():
 PLATAFORMA_URL = "https://match.brada.social"
 COL_CONTROLE = "regua_expiracao_envios"
 MARCA_ORIGEM = "regua_expiracao"
+# Toda regua que escreve na colecao `mail` se declara aqui. E o que permite
+# auditar "quantos e-mails a regua X mandou" e o que a retentativa varre.
+MARCAS_REGUA = ("regua_expiracao", "regua_rascunho")
 
 # O Gmail devolve 421-4.3.0 quando recebe uma rajada do mesmo remetente.
 # Espacar os envios evita a falha, que e o que aconteceu no 1o disparo (4 de 31).
@@ -219,7 +222,9 @@ def retentar_falhas(db, aplicar: bool) -> int:
     entrega (ex.: 421 do Gmail por rajada) ficaria perdida para sempre.
     O doc original recebe `retentadoEm` para nao entrar em loop.
     """
-    prefixos = ("O projeto ", "O prazo do projeto ")
+    # `origem` e a fonte primaria. Os prefixos so cobrem os e-mails enviados
+    # antes do campo existir — sem eles, uma falha antiga ficaria orfa.
+    prefixos = ("O projeto ", "O prazo do projeto ", "Seus ")
     candidatos = []
     for d in db.collection("mail").stream():
         x = d.to_dict() or {}
@@ -227,7 +232,8 @@ def retentar_falhas(db, aplicar: bool) -> int:
         if str(deliv.get("state")) != "ERROR" or x.get("retentadoEm"):
             continue
         msg = x.get("message") or {}
-        e_da_regua = x.get("origem") == MARCA_ORIGEM or str(msg.get("subject") or "").startswith(prefixos)
+        e_da_regua = (x.get("origem") in MARCAS_REGUA
+                      or str(msg.get("subject") or "").startswith(prefixos))
         if e_da_regua and x.get("to"):
             candidatos.append((d, x))
 
