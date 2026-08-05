@@ -29,6 +29,11 @@ import argparse, csv, datetime as dt, json, os, pathlib, re, sys, time
 from google.cloud import firestore
 from google.oauth2 import service_account
 
+# Fonte unica das exclusoes. `e_interno` e reexportado porque as outras reguas
+# ja importam daqui; quem chegar depois deve usar `motivo_exclusao`, que diz
+# TAMBEM o motivo, e nao so que a pessoa saiu da fila.
+from filtros import e_interno, e_texto_de_teste, motivo_exclusao  # noqa: F401
+
 PROJECT_ID = "gen-lang-client-0225656939"
 DATABASE = "ai-studio-93e1b1b8-c1c0-446c-87ba-d8fb8e3b0dd6"
 SA_FILE = r"C:\Users\bruno\.brada-secrets\firebase-sa.json"
@@ -50,7 +55,7 @@ COL_CONTROLE = "regua_expiracao_envios"
 MARCA_ORIGEM = "regua_expiracao"
 # Toda regua que escreve na colecao `mail` se declara aqui. E o que permite
 # auditar "quantos e-mails a regua X mandou" e o que a retentativa varre.
-MARCAS_REGUA = ("regua_expiracao", "regua_rascunho")
+MARCAS_REGUA = ("regua_expiracao", "regua_rascunho", "regua_vitrine")
 
 # RITMO DE ENVIO — aprendido na pratica, em dois disparos reais:
 #   31 e-mails a 0s   -> 4 falharam com 421-4.3.0 (Temporary System Problem)
@@ -63,13 +68,8 @@ MARCAS_REGUA = ("regua_expiracao", "regua_rascunho")
 # uns 17 minutos, o que e aceitavel para uma regua que roda sozinha.
 PAUSA_ENTRE_ENVIOS_S = 8.0
 
-# Dominios e enderecos internos: nunca recebem a regua.
-DOMINIOS_INTERNOS = ("@brada.social", "@somosbrada.com.br")
-EMAILS_INTERNOS = {
-    "marketing@brada.social", "suporte@brada.social", "inovacao@brada.social",
-    "evaristo.ramalho@somosbrada.com.br", "carolina.barbosa@somosbrada.com.br",
-    "diego.baptista@somosbrada.com.br",
-}
+# Quem nunca recebe (interno, parceiro, dominio descartavel, conta de teste)
+# mora em filtros.py, compartilhado pelas tres reguas.
 
 # Toque -> (dias_min, dias_max) em relacao a hoje. Negativo = ja expirou.
 TOQUES = {
@@ -167,11 +167,6 @@ def parse_data(v):
             pass
     m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(v))
     return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
-
-
-def e_interno(email: str) -> bool:
-    e = (email or "").strip().lower()
-    return (not e) or e in EMAILS_INTERNOS or e.endswith(DOMINIOS_INTERNOS)
 
 
 def mascarar(email: str) -> str:
@@ -314,10 +309,11 @@ def main():
         chave = f"{c['project_id']}__{c['toque']}"
         if chave in ja_enviados:
             pulados.append((c, "ja enviado")); continue
-        if not c["email"]:
-            pulados.append((c, "sem e-mail")); continue
-        if e_interno(c["email"]):
-            pulados.append((c, "interno")); continue
+        motivo = motivo_exclusao(c["email"], c["nome"])
+        if motivo:
+            pulados.append((c, motivo)); continue
+        if e_texto_de_teste(c["titulo"]):
+            pulados.append((c, "projeto de teste")); continue
         if not c["verificado"]:
             pulados.append((c, "e-mail nao verificado")); continue
         if args.so_email and c["email"].lower() != args.so_email.lower():
