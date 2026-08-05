@@ -1,0 +1,70 @@
+name: Regua da vitrine
+
+# Projeto publicado e vigente, dono sem acessar ha 30 dias ou mais.
+#
+# Por que semanal e nao diario: o segmento nao existe de um dia pro outro, ele
+# se forma quando alguem cruza a linha dos 30 dias sem acessar. Medido em
+# 05/08: 38 pessoas acessaram nos ultimos 30 dias e vao entrar na fila ao longo
+# do proximo mes.
+#
+# Por que 13:00 UTC e nao 11:00: a regua de expiracao roda 11:00 todo dia. Duas
+# reguas enviando ao mesmo tempo quebram a pausa de 8s de cada uma — na pratica
+# vira 4s, que e o intervalo que ja derrubou 45 e-mails num lote.
+
+on:
+  schedule:
+    - cron: '0 13 * * 2'  # tercas, 13:00 UTC = 10:00 BRT
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'dry-run (so lista) ou apply (envia)'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options: [dry-run, apply]
+      limite:
+        description: 'teto de envios por execucao'
+        required: false
+        default: '30'
+
+jobs:
+  regua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      # No agendado envia sempre; no manual respeita a escolha.
+      - name: Definir modo
+        id: modo
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.modo }}" = "apply" ]; then
+            echo "flag=--apply" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # O teto e guarda-corpo, nao limite operacional: em regime sao poucos por
+      # semana. Ele existe pro caso de um bug de segmentacao tornar muita gente
+      # elegivel de uma vez — saem 30 e-mails errados, nao 600.
+      - name: Regua da vitrine
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          LEADLOVERS_TOKEN: ${{ secrets.LEADLOVERS_TOKEN }}
+        run: >-
+          python regua_vitrine.py ${{ steps.modo.outputs.flag }}
+          --checar-supressao --limite ${{ inputs.limite || '30' }}
+
+      - name: Guardar log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regua-vitrine-log
+          path: logs/regua_vitrine/
+          if-no-files-found: ignore

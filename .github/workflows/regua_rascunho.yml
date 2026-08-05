@@ -1,0 +1,66 @@
+name: Regua de rascunho
+
+# Dono de projeto em Rascunho, com a lista do que falta em cada um.
+#
+# Este segmento regenera devagar: 1 rascunho novo em 30 dias (medido em 05/08).
+# Eu tinha argumentado que nao valia agendar, e o Bruno decidiu automatizar
+# tudo — o custo e um workflow que quase sempre nao envia nada, e o ganho e nao
+# depender de alguem lembrar. Com o cache de supressao, a execucao vazia nao
+# consulta a API do LeadLovers nenhuma vez.
+#
+# Segunda, longe da vitrine (terca), dos sem projeto (quinta) e da expiracao
+# (todo dia, 11:00). Duas reguas enviando junto quebram a pausa de 8s.
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'  # segundas, 13:00 UTC = 10:00 BRT
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'dry-run (so lista) ou apply (envia)'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options: [dry-run, apply]
+      limite:
+        description: 'teto de envios por execucao'
+        required: false
+        default: '30'
+
+jobs:
+  regua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Definir modo
+        id: modo
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.modo }}" = "apply" ]; then
+            echo "flag=--apply" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Regua de rascunho
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          LEADLOVERS_TOKEN: ${{ secrets.LEADLOVERS_TOKEN }}
+        run: >-
+          python regua_rascunho.py ${{ steps.modo.outputs.flag }}
+          --checar-supressao --limite ${{ inputs.limite || '30' }}
+
+      - name: Guardar log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regua-rascunho-log
+          path: logs/regua_rascunho/
+          if-no-files-found: ignore
