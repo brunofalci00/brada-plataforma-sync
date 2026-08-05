@@ -26,9 +26,10 @@ import argparse, csv, datetime as dt, os, pathlib, sys, time
 from google.cloud import firestore
 
 from regua_expiracao import (
-    conectar, mascarar, e_interno, _primeiro_nome,
+    conectar, mascarar, _primeiro_nome,
     PAUSA_ENTRE_ENVIOS_S, PLATAFORMA_URL,
 )
+from filtros import e_texto_de_teste, motivo_exclusao
 
 COL_CONTROLE = "regua_rascunho_envios"
 # Marca propria: sem isso os e-mails desta regua entram na colecao `mail`
@@ -176,6 +177,9 @@ def coletar(db):
         p = d.to_dict() or {}
         if str(p.get("status") or "").strip() != "Rascunho":
             continue
+        titulo = str(p.get("title") or "seu projeto").strip()
+        if e_texto_de_teste(titulo):
+            continue
         dono_id = str(p.get("ownerId") or "")
         dono = users.get(dono_id)
         if not dono:
@@ -184,10 +188,9 @@ def coletar(db):
             "email": str(dono.get("email") or "").strip(),
             "nome": str(dono.get("name") or dono.get("displayName") or "").strip(),
             "verificado": bool(dono.get("emailVerified", True)),
-            "logou": bool(dono.get("lastLoginAt")),
             "projetos": [],
         })
-        reg["projetos"].append((str(p.get("title") or "seu projeto").strip(), campos_faltando(p)))
+        reg["projetos"].append((titulo, campos_faltando(p)))
     return por_dono
 
 
@@ -222,10 +225,11 @@ def main():
     for dono_id, reg in por_dono.items():
         if dono_id in ja:
             pular("ja enviado"); continue
-        if not reg["email"]:
-            pular("sem e-mail"); continue
-        if e_interno(reg["email"]):
-            pular("interno"); continue
+        motivo = motivo_exclusao(reg["email"], reg["nome"])
+        if motivo:
+            pular(motivo); continue
+        if not reg["projetos"]:
+            pular("so tinha projeto de teste"); continue
         if not reg["verificado"]:
             pular("e-mail nao verificado"); continue
         if args.so_email and reg["email"].lower() != args.so_email.lower():
