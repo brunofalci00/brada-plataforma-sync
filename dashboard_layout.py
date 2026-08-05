@@ -20,7 +20,13 @@ card "Ativacao" (proxy ~100% por auto-login) trocado por "Total de novos".
 
 import datetime
 
-LAYOUT_VERSION = "v5"
+LAYOUT_VERSION = "v6.1"
+
+# Grade da aba e area gerenciada. Os dois andam juntos: AREA e o que o script
+# limpa, desmergia, formata e protege; GRID_ROWS e o tamanho fisico da aba.
+# AREA sempre <= GRID_ROWS, senao a API rejeita o batch.
+GRID_ROWS = 80
+AREA = "A1:H70"
 DASH_TITLE = "Dashboard"
 SENTINEL_CELL = "Z1"
 
@@ -88,13 +94,36 @@ MERGES = [
     "A25:B25", "C25:D25", "E25:F25", "G25:H25",
     "A27:C27", "D27:H27",
     "F28:H35",
+    # PUBLICACAO (37-40): existia so como valor, sem layout nenhum. 2 cards.
+    "A37:H37",
+    "A38:B39", "C38:D39",
+    "A40:B40", "C40:D40",
+    # PRAZO — o que vence quando (42-45)
+    "A42:H42",
+    "A43:B44", "C43:D44", "E43:F44", "G43:H44",
+    "A45:B45", "C45:D45", "E45:F45", "G45:H45",
+    # FUNIL DO PROPONENTE (47-50)
+    "A47:H47",
+    "A48:B49", "C48:D49", "E48:F49", "G48:H49",
+    "A50:B50", "C50:D50", "E50:F50", "G50:H50",
+    # RASCUNHOS — o que trava (52-55)
+    "A52:H52",
+    "A53:B54", "C53:D54", "E53:F54", "G53:H54",
+    "A55:B55", "C55:D55", "E55:F55", "G55:H55",
+    # ATIVIDADE POR SEMANA (57-65): tabela em A:B + sparkline em C:H
+    "A57:H57",
+    "C58:H65",
 ]
 
 # Faixas de "card" (numero + label compartilham o fundo suave)
-CARD_BANDS = ["A5:H7", "A8:H10", "A13:H15", "A18:E20", "A23:H25"]
-NUMBER_RANGES = ["A5:H6", "A8:H9", "A13:H14", "A18:E19", "A23:H24"]
-LABEL_RANGES = ["A7:H7", "A10:H10", "A15:H15", "A20:E20", "A25:H25"]
-HEADER_RANGES = ["A4:H4", "A12:H12", "A17:H17", "A22:H22"]
+CARD_BANDS = ["A5:H7", "A8:H10", "A13:H15", "A18:E20", "A23:H25",
+              "A38:D40", "A43:H45", "A48:H50", "A53:H55"]
+NUMBER_RANGES = ["A5:H6", "A8:H9", "A13:H14", "A18:E19", "A23:H24",
+                 "A38:D39", "A43:H44", "A48:H49", "A53:H54"]
+LABEL_RANGES = ["A7:H7", "A10:H10", "A15:H15", "A20:E20", "A25:H25",
+                "A40:D40", "A45:H45", "A50:H50", "A55:H55"]
+HEADER_RANGES = ["A4:H4", "A12:H12", "A17:H17", "A22:H22",
+                 "A37:H37", "A42:H42", "A47:H47", "A52:H52"]
 PERCENT_RANGES = ["E13:F14", "G13:H14"]
 
 
@@ -110,11 +139,16 @@ def layout_requests(sheet_id, meta):
         "properties": {"timeZone": "America/Sao_Paulo", "locale": "pt_BR"},
         "fields": "timeZone,locale"}})
 
+    # PRIMEIRO request que toca a grade: cresce as linhas ANTES de qualquer
+    # coisa referenciar A1:H70. A aba nasceu com 60 linhas; um unmerge/repeatCell
+    # com endRowIndex acima disso faz a API rejeitar o BATCH INTEIRO.
+    # Idempotente: setar 80 quando ja e 80 nao faz nada.
     req.append({"updateSheetProperties": {
         "properties": {"sheetId": sheet_id, "index": 0,
                        "tabColor": LARANJA,
-                       "gridProperties": {"hideGridlines": True}},
-        "fields": "index,tabColor,gridProperties.hideGridlines"}})
+                       "gridProperties": {"hideGridlines": True,
+                                          "rowCount": GRID_ROWS}},
+        "fields": "index,tabColor,gridProperties.hideGridlines,gridProperties.rowCount"}})
 
     # Oculta as outras abas (UX, nao seguranca — raw so tem hash)
     for s in meta.get("sheets", []):
@@ -145,12 +179,12 @@ def layout_requests(sheet_id, meta):
         "properties": {"pixelSize": 42}, "fields": "pixelSize"}})
 
     # Merges (idempotente)
-    req.append({"unmergeCells": {"range": grid(sheet_id, "A1:H50")}})
+    req.append({"unmergeCells": {"range": grid(sheet_id, AREA)}})
     for m in MERGES:
         req.append({"mergeCells": {"range": grid(sheet_id, m), "mergeType": "MERGE_ALL"}})
 
     # Reset visual
-    req.append(_fmt(grid(sheet_id, "A1:H50"),
+    req.append(_fmt(grid(sheet_id, AREA),
                     {"backgroundColor": BRANCO,
                      "textFormat": {"fontSize": 10, "foregroundColor": CINZA_ESCURO},
                      "verticalAlignment": "MIDDLE"},
@@ -215,16 +249,24 @@ def layout_requests(sheet_id, meta):
                         "textFormat,horizontalAlignment"))
 
     # Subheaders das tabelas
-    for h in ["A27:C27", "D27:H27"]:
+    for h in ["A27:C27", "D27:H27", "A57:H57"]:
         req.append(_fmt(grid(sheet_id, h),
                         {"textFormat": {"bold": True, "fontSize": 10, "foregroundColor": CINZA_ESCURO}},
                         "textFormat"))
-    # Tabelas
-    req.append(_fmt(grid(sheet_id, "A28:B33"),
-                    {"textFormat": {"fontSize": 9}}, "textFormat"))
-    req.append(_fmt(grid(sheet_id, "D28:E35"),
-                    {"textFormat": {"fontSize": 9}}, "textFormat"))
-    req.append(_fmt(grid(sheet_id, "A33:B33"),  # Total bold
+    # Tabelas.
+    # A tabela de canais tem 8 linhas (7 canais + Total): CANAIS_EXIBIDOS mudou e
+    # estes ranges nao acompanharam, entao o bold do "Total" caia em "Comercial"
+    # e as duas ultimas linhas ficavam sem o 9pt.
+    # O numberFormat e explicito de proposito: o reset visual so mexe em
+    # backgroundColor/textFormat/verticalAlignment, entao um formato herdado de
+    # layout antigo sobrevive a todos os bumps. Era o caso de E28, que exibia o
+    # "5" da semana de 15/06 como "500,0%".
+    for t in ["A28:B35", "D28:E35", "A58:B65"]:
+        req.append(_fmt(grid(sheet_id, t),
+                        {"textFormat": {"fontSize": 9},
+                         "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},
+                        "textFormat,numberFormat"))
+    req.append(_fmt(grid(sheet_id, "A35:B35"),  # Total bold
                     {"textFormat": {"fontSize": 9, "bold": True}}, "textFormat"))
 
     # Sentinela invisivel
@@ -243,7 +285,7 @@ def layout_requests(sheet_id, meta):
 
     # Protecao branda
     req.append({"addProtectedRange": {"protectedRange": {
-        "range": grid(sheet_id, "A1:H50"),
+        "range": grid(sheet_id, AREA),
         "description": "Aba gerada pelo brada-plataforma-sync — editar via pipeline",
         "warningOnly": True}}})
 
@@ -289,9 +331,34 @@ def value_data(m, now_brt_naive):
         ("A28", [[label, m["canais"].get(key, 0)] for key, label in CANAIS_EXIBIDOS]
                 + [["Total", sum(m["canais"].values())]]),
         ("D28", [[lbl, n] for lbl, n in m["semanas"]]),
-        ("A37", [["PUBLICAÇÃO (rascunhos vigentes)"]]),
+        ("A37", [["PUBLICAÇÃO — QUALIDADE DO QUE ESTÁ NO AR"]]),
         ("A38", [[m["st_disponivel_completo"]]]), ("C38", [[m["st_disponivel_selo"]]]),
         ("A40", [["Disponíveis completos"]]), ("C40", [["Dados em atualização"]]),
+
+        # O que vem pela frente. Sem isto a aba so mostra o presente, e a
+        # expiracao so aparece depois de ter acontecido.
+        ("A42", [["PRAZO — O QUE VENCE QUANDO"]]),
+        ("A43", [[m["vence_30d"]]]), ("C43", [[m["vence_60d"]]]),
+        ("E43", [[m["vence_90d"]]]), ("G43", [[m["vence_180d"]]]),
+        ("A45", [["Vencem em 30 dias"]]), ("C45", [["Em 60 dias"]]),
+        ("E45", [["Em 90 dias"]]), ("G45", [["Em 180 dias"]]),
+
+        # Onde vaza. So proponente (ONG); "publicou" = status != Rascunho.
+        ("A47", [["FUNIL DO PROPONENTE"]]),
+        ("A48", [[m["funil_cadastraram"]]]), ("C48", [[m["funil_acessaram"]]]),
+        ("E48", [[m["funil_com_projeto"]]]), ("G48", [[m["funil_publicaram"]]]),
+        ("A50", [["Cadastraram"]]), ("C50", [["Acessaram"]]),
+        ("E50", [["Criaram projeto"]]), ("G50", [["Publicaram"]]),
+
+        # O bloco acionavel: diz o que fazer, nao so o que esta ruim.
+        ("A52", [["RASCUNHOS — O QUE TRAVA"]]),
+        ("A53", [[m["rasc_sem_diario"]]]), ("C53", [[m["rasc_sem_descricao"]]]),
+        ("E53", [[m["rasc_sem_orcamento"]]]), ("G53", [[m["rasc_perto"]]]),
+        ("A55", [["Sem Diário Oficial"]]), ("C55", [["Sem descrição"]]),
+        ("E55", [["Sem orçamento"]]), ("G55", [["A 3 campos de publicar"]]),
+
+        ("A57", [["ATIVIDADE POR SEMANA — usuários ativos nos últimos 30 dias"]]),
+        ("A58", [[lbl, n] for lbl, n in m["semanas_ativos"]]),
     ]
     return [{"range": f"{DASH_TITLE}!{rng}", "values": vals} for rng, vals in d]
 
@@ -307,7 +374,7 @@ def ensure_dashboard(sh, metrics, now_brt_naive):
         ws = sh.worksheet(DASH_TITLE)
         created = False
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=DASH_TITLE, rows=60, cols=26)
+        ws = sh.add_worksheet(title=DASH_TITLE, rows=GRID_ROWS, cols=26)
         created = True
 
     sentinel = ws.acell(SENTINEL_CELL).value
@@ -317,17 +384,20 @@ def ensure_dashboard(sh, metrics, now_brt_naive):
         sh.batch_update({"requests": layout_requests(ws.id, meta)})
         # So no BUMP de versao: limpa valores orfaos do layout anterior.
         # Runs diarios seguem sem clear (aba nunca fica em branco).
-        ws.batch_clear(["A1:H50"])
+        ws.batch_clear([AREA])
         applied = True
 
     sh.values_batch_update({
         "valueInputOption": "RAW",
         "data": value_data(metrics, now_brt_naive),
     })
-    # Unica formula da aba (documentada): sparkline da serie semanal
+    # Unicas formulas da aba (documentadas): as duas sparklines
     sh.values_batch_update({
         "valueInputOption": "USER_ENTERED",
-        "data": [{"range": f"{DASH_TITLE}!F28", "values": [["=SPARKLINE(E28:E35)"]]}],
+        "data": [
+            {"range": f"{DASH_TITLE}!F28", "values": [["=SPARKLINE(E28:E35)"]]},
+            {"range": f"{DASH_TITLE}!C58", "values": [["=SPARKLINE(B58:B65)"]]},
+        ],
     })
     if applied:
         sh.values_batch_update({
