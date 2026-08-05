@@ -134,6 +134,33 @@ def _dias_desde(ts, hoje: dt.date):
     return (hoje - d).days
 
 
+def exigir_checagem_supressao(args):
+    """
+    Barra `--apply` sem checagem de descadastro nas reguas de campanha.
+
+    A spec ja dizia que a checagem e obrigatoria, mas era regra escrita, nao
+    regra imposta. O modo de falha e concreto: a fila continua mostrando quem
+    pediu descadastro (eles nunca entram na colecao de controle, porque nunca
+    receberam), entao um `--apply` sem a flag manda e-mail para exatamente as
+    pessoas que optaram por sair. Alem de violar a LGPD, a reclamacao de spam
+    cai no `noreply@brada.social`, que e o remetente da verificacao de e-mail
+    dos cadastros novos.
+
+    `--sem-checagem` existe como saida de emergencia consciente (ex.: API do
+    LeadLovers fora do ar e disparo que nao pode esperar), mas obriga a
+    escrever isso na linha de comando.
+    """
+    if getattr(args, "apply", False) and not getattr(args, "checar_supressao", False) \
+            and not getattr(args, "sem_checagem", False):
+        import sys as _sys
+        _sys.exit(
+            "ERRO: --apply exige --checar-supressao.\n"
+            "  Sem ela, a fila inclui quem pediu descadastro e o disparo vira\n"
+            "  violacao de LGPD no remetente que envia a verificacao de cadastro.\n"
+            "  Se for mesmo intencional, use --sem-checagem."
+        )
+
+
 def uids_tocados(db, dias: int = JANELA_DEDUP_DIAS, hoje: dt.date = None,
                  dono_de_projeto: dict = None) -> dict:
     """

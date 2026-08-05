@@ -72,6 +72,44 @@ def carregar_planilha(gc):
     return out
 
 
+def projetos_por_pessoa(gc):
+    """
+    {id_pessoa: [(nome_do_projeto, fim_execucao)]} da plataforma antiga.
+
+    CUIDADO COM AS DUAS COLUNAS DE ID: o `legacy_id` que `carregar_planilha`
+    devolve e o "Id do projeto". Quem casa com o campo `legacyId` do usuario
+    no Firestore e o "Id da Pessoa", que e outra coluna. Validado em 05/08:
+    dos 385 donos de projeto na plataforma nova, 351 casam por aqui (97% dos
+    que tem o campo preenchido).
+
+    A fronteira de PII do modulo continua: e-mail, telefone e nome de pessoa
+    NAO saem daqui. Nome de projeto sai, porque e publico e a regua precisa
+    dele para dizer de qual projeto esta falando.
+    """
+    vals = gc.open_by_key(PLANILHA_ANTIGA_ID).worksheet(ABA_PROJETOS).get_all_values()
+    header = vals[0]
+    idx = {re.sub(r"\s+", " ", h.strip()): i for i, h in enumerate(header) if h.strip()}
+
+    def col(row, *names):
+        for n in names:
+            i = idx.get(n)
+            if i is not None and i < len(row):
+                return row[i].strip()
+        return ""
+
+    out = {}
+    for r in vals[1:]:
+        if not any(c.strip() for c in r):
+            continue
+        pessoa = col(r, "Id da Pessoa")
+        nome = col(r, "Nome do projeto")
+        if not pessoa or not nome:
+            continue
+        fim = _parse_br(col(r, "Data Fim de Execucao", "Data Fim de Execução"))
+        out.setdefault(pessoa, []).append((nome, fim))
+    return out
+
+
 def situacao(fim_execucao, ref):
     if fim_execucao is None:
         return "sem_data"

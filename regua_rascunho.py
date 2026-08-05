@@ -29,7 +29,7 @@ from regua_expiracao import (
     conectar, mascarar, _primeiro_nome,
     PAUSA_ENTRE_ENVIOS_S, PLATAFORMA_URL,
 )
-from filtros import e_texto_de_teste, motivo_exclusao
+from filtros import e_texto_de_teste, motivo_exclusao, exigir_checagem_supressao
 
 COL_CONTROLE = "regua_rascunho_envios"
 # Marca propria: sem isso os e-mails desta regua entram na colecao `mail`
@@ -207,7 +207,10 @@ def main():
     ap.add_argument("--so-email", default="")
     ap.add_argument("--checar-supressao", action="store_true",
                     help="consulta o LeadLovers e pula quem pediu descadastro (412)")
+    ap.add_argument("--sem-checagem", action="store_true",
+                    help="dispara sem consultar o descadastro (saida de emergencia)")
     args = ap.parse_args()
+    exigir_checagem_supressao(args)
 
     modo = "APPLY (ENVIA)" if args.apply else "DRY-RUN (nao envia)"
     print(f"=== REGUA DE RASCUNHO — {modo} ===")
