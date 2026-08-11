@@ -902,6 +902,58 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
 
 
 # ===================================================
+# SENTINELA DAS FUNCTIONS EM PRODUCAO
+# ===================================================
+
+# Em 11/08 uma exportacao do AI Studio sobrescreveu a `main` da plataforma e
+# levou junto 6 correcoes, entre elas a onProposalCreated e o desligamento da
+# sendFundingReminder. Ninguem percebeu ate alguem ir olhar na mao: nao havia
+# alarme nenhum.
+#
+# Isto confere o que esta VIVO em producao, nao o que esta no repositorio —
+# porque e o deploy que muda o comportamento do usuario, e o repo pode ficar
+# errado por dias sem consequencia. Roda junto do sync diario e derruba o
+# workflow se o estado divergir, o que dispara o e-mail de falha do GitHub.
+FUNCTIONS_ESPERADAS = {
+    # nome: precisa estar no ar?
+    "onProposalCreated": True,    # T6: avisa o incentivador de proposta nova
+    "onProposalUpdated": True,    # T9 mora dentro dela (aviso de aprovacao)
+    "sendFundingReminder": False,  # T4: duplicava a regua, ja atingiu 2 pessoas
+}
+
+
+def conferir_functions():
+    """Devolve lista de divergencias entre producao e o esperado. Vazia = ok."""
+    import requests
+    from google.oauth2 import service_account
+    from google.auth.transport.requests import Request
+
+    try:
+        creds = service_account.Credentials.from_service_account_info(
+            _firebase_creds_info(),
+            scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds.refresh(Request())
+        r = requests.get(
+            f"https://cloudfunctions.googleapis.com/v2/projects/{FIREBASE_PROJECT}"
+            f"/locations/-/functions",
+            headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
+        if r.status_code != 200:
+            return [f"nao deu pra listar as functions (HTTP {r.status_code})"]
+        no_ar = {f["name"].split("/")[-1] for f in r.json().get("functions", [])}
+    except Exception as e:
+        # Checagem externa nunca derruba o sync por conta propria.
+        return [f"nao deu pra listar as functions ({type(e).__name__})"]
+
+    fora = []
+    for nome, esperado in FUNCTIONS_ESPERADAS.items():
+        if esperado and nome not in no_ar:
+            fora.append(f"{nome} SUMIU de producao (deploy a partir de um repo desatualizado?)")
+        elif not esperado and nome in no_ar:
+            fora.append(f"{nome} VOLTOU para producao (duplica a regua de expiracao)")
+    return fora
+
+
+# ===================================================
 # COMUNICACAO COM O USUARIO (reguas de e-mail)
 # ===================================================
 
@@ -1261,6 +1313,19 @@ def main():
     print(f"  Dashboard: valores atualizados | {status_layout}")
     print(f"plataforma_sync: OK | users={len(users_rows)} projects={len(projects_rows)} "
           f"proposals={len(proposals_rows)} | {round(time.time() - t0, 1)}s")
+
+    # POR ULTIMO, depois de tudo escrito: a planilha atualiza normalmente e o
+    # workflow fica vermelho, que e o que faz o alarme chegar em alguem.
+    divergencias = conferir_functions()
+    if divergencias:
+        print("\n" + "=" * 62)
+        print("ALERTA: as functions em producao divergem do esperado")
+        for d in divergencias:
+            print(f"  - {d}")
+        print("  Ver o backlog tecnico em 00_Plano_Retomada_Index (T4, T6, T9).")
+        print("=" * 62)
+        raise SystemExit(1)
+    print("  functions em producao: conferidas")
 
 
 if __name__ == "__main__":
