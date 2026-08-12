@@ -976,7 +976,34 @@ def _ts_ms(v):
         return None
 
 
-def metricas_email(db, login_index, dono_de_projeto, now_brt):
+def mapa_primeiro_envio(db, dono_de_projeto):
+    """
+    uid -> timestamp (ms) do PRIMEIRO e-mail que a gente mandou pra pessoa.
+
+    Documento sem `enviadoEm` e registro de descadastro
+    (`filtros.registrar_supressao`), nao envio: nao entra.
+
+    Fica fora das funcoes de metrica porque as duas precisam dele — comunicacao
+    e origem do crescimento. Lido uma vez no `main` e passado adiante.
+    """
+    primeiro = {}
+
+    def marcar(uid, ms):
+        if uid and ms is not None:
+            anterior = primeiro.get(uid)
+            primeiro[uid] = ms if anterior is None else min(anterior, ms)
+
+    for col in CONTROLES_POR_PESSOA:
+        for d in db.collection(col).stream():
+            marcar(d.id, _ts_ms((d.to_dict() or {}).get("enviadoEm")))
+    for d in db.collection(CONTROLE_POR_PROJETO).stream():
+        x = d.to_dict() or {}
+        pid = x.get("projectId") or d.id.split("__")[0]
+        marcar(dono_de_projeto.get(pid), _ts_ms(x.get("enviadoEm")))
+    return primeiro
+
+
+def metricas_email(db, login_index, primeiro_envio, now_brt):
     """
     Indicadores da comunicacao com o usuario.
 
@@ -1006,22 +1033,6 @@ def metricas_email(db, login_index, dono_de_projeto, now_brt):
             # hoje sao 49 erros, TODOS reenviados, e a taxa real e 100%.
             erro += 1
 
-    # uid -> primeiro envio. Documento sem `enviadoEm` e registro de
-    # descadastro (filtros.registrar_supressao), nao envio: nao conta.
-    primeiro_envio = {}
-    def marcar(uid, ms):
-        if uid and ms is not None:
-            anterior = primeiro_envio.get(uid)
-            primeiro_envio[uid] = ms if anterior is None else min(anterior, ms)
-
-    for col in CONTROLES_POR_PESSOA:
-        for d in db.collection(col).stream():
-            marcar(d.id, _ts_ms((d.to_dict() or {}).get("enviadoEm")))
-    for d in db.collection(CONTROLE_POR_PROJETO).stream():
-        x = d.to_dict() or {}
-        pid = x.get("projectId") or d.id.split("__")[0]
-        marcar(dono_de_projeto.get(pid), _ts_ms(x.get("enviadoEm")))
-
     # Voltou = ultimo acesso no Auth e POSTERIOR ao primeiro e-mail que mandamos.
     voltaram = sum(1 for uid, ms in primeiro_envio.items()
                    if (login_index.get(uid) or 0) > ms)
@@ -1032,6 +1043,72 @@ def metricas_email(db, login_index, dono_de_projeto, now_brt):
         "mail_entrega_frac": round(ok / (ok + erro), 4) if (ok + erro) else 0,
         "mail_voltaram_frac": (round(voltaram / len(primeiro_envio), 4)
                                if primeiro_envio else 0),
+    }
+
+
+# ===================================================
+# DE ONDE VEM O CRESCIMENTO
+# ===================================================
+
+# Janela movel. A aba e lida continuamente, entao "ultimos 30 dias" responde
+# melhor que "desde tal data". Em 12/08 a janela curta escondia o buraco de
+# atribuicao: 8 sem origem em 8 dias contra 25 em 30 dias.
+JANELA_ORIGEM_DIAS = 30
+
+
+def metricas_origem(projects_raw, users_raw, primeiro_envio, now_brt):
+    """
+    Responde "de onde vem o crescimento" e "esse crescimento e concentrado?".
+
+    Nasce da pergunta da Tamyris em 12/08 ("os projetos estao evoluindo muito,
+    e algo da Automatize?"). A resposta levou um dia de apuracao pela segunda
+    vez, entao agora fica na aba.
+
+    O card de concentracao e o que impede a leitura errada: em 12/08 eram 102
+    projetos novos, mas 40 de um unico dono. "+102 projetos" e "+102 projetos
+    dos quais 39% de uma pessoa" levam a decisoes opostas.
+
+    NAO abre stream proprio: recebe `projects_raw` e `users_raw` que o main ja
+    carregou. Streamar aqui custaria ~1.800 leituras de documento por execucao,
+    todo dia, sem ganho nenhum.
+
+    PII: so contagens. Nenhum e-mail, nome ou id de dono sai daqui.
+    """
+    corte = (now_brt - datetime.timedelta(days=JANELA_ORIGEM_DIAS)).date()
+
+    # uid -> origem da AQUISICAO. Distinta da ativacao: alguem pode ter chegado
+    # pelo LeadLovers em julho e so criado projeto em agosto depois da regua.
+    origem_do_dono = {}
+    for doc_id, u in users_raw:
+        attr = u.get("attribution") if isinstance(u.get("attribution"), dict) else {}
+        # norm_utm e obrigatorio: producao ja teve UTM com espaco no fim, e sem
+        # normalizar "Automatize " viraria um bucket separado.
+        src = norm_utm(attr.get("utm_source"))
+        origem_do_dono[doc_id] = src or ("migrado" if u.get("legacyId") else "sem_atribuicao")
+
+    por_origem = Counter()
+    por_dono = Counter()
+    for doc_id, p in projects_raw:
+        criado = to_date(p.get("createdAt"))  # string ISO, nao Timestamp
+        if not criado or criado < str(corte):
+            continue
+        dono = str(p.get("ownerId") or "")
+        por_dono[dono] += 1
+        por_origem[origem_do_dono.get(dono, "sem_atribuicao")] += 1
+
+    total = sum(por_origem.values())
+    maior = por_dono.most_common(1)[0][1] if por_dono else 0
+    de_tocados = sum(n for uid, n in por_dono.items() if uid in primeiro_envio)
+
+    return {
+        "orig_automatize": por_origem.get("automatize", 0),
+        "orig_leadlovers": por_origem.get("leadlovers", 0),
+        "orig_migrado": por_origem.get("migrado", 0),
+        "orig_sem_atribuicao": por_origem.get("sem_atribuicao", 0),
+        "orig_projetos_novos": total,
+        "orig_donos": len(por_dono),
+        "orig_concentracao_frac": round(maior / total, 4) if total else 0,
+        "orig_de_tocados": de_tocados,
     }
 
 
@@ -1250,14 +1327,17 @@ def main():
 
     now_brt = datetime.datetime.now(BRT)
     metrics = compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt)
-    # Comunicacao: le a colecao `mail` e as colecoes de controle das reguas.
-    # Fica fora de compute_dashboard_metrics porque aquela funcao trabalha em
-    # cima das linhas ja montadas e nao tem acesso ao Firestore.
-    metrics.update(metricas_email(
-        db, login_index,
-        {doc_id: str(d.get("ownerId") or "") for doc_id, d in projects_raw},
-        now_brt,
-    ))
+    # Comunicacao e origem do crescimento. Ficam fora de
+    # compute_dashboard_metrics porque aquela funcao trabalha em cima das linhas
+    # ja montadas e nao tem acesso ao Firestore.
+    #
+    # As colecoes de controle das reguas sao lidas UMA vez aqui: as duas
+    # metricas precisam do mesmo mapa, uma pra saber quem voltou depois do
+    # e-mail e outra pra separar ativacao de aquisicao.
+    dono_de_projeto = {doc_id: str(d.get("ownerId") or "") for doc_id, d in projects_raw}
+    primeiro_envio = mapa_primeiro_envio(db, dono_de_projeto)
+    metrics.update(metricas_email(db, login_index, primeiro_envio, now_brt))
+    metrics.update(metricas_origem(projects_raw, users_raw, primeiro_envio, now_brt))
     metrics.update(mig_metrics)  # bloco MIGRACAO da aba Dashboard
     # Serie semanal: fallback so com o snapshot de hoje (dry-run e seguranca contra
     # KeyError em value_data). E sobrescrita logo apos a escrita do snap_diario,
