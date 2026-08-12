@@ -20,13 +20,13 @@ card "Ativacao" (proxy ~100% por auto-login) trocado por "Total de novos".
 
 import datetime
 
-LAYOUT_VERSION = "v6.2"
+LAYOUT_VERSION = "v6.3"
 
 # Grade da aba e area gerenciada. Os dois andam juntos: AREA e o que o script
 # limpa, desmergia, formata e protege; GRID_ROWS e o tamanho fisico da aba.
 # AREA sempre <= GRID_ROWS, senao a API rejeita o batch.
-GRID_ROWS = 80
-AREA = "A1:H70"
+GRID_ROWS = 100
+AREA = "A1:H90"
 DASH_TITLE = "Dashboard"
 SENTINEL_CELL = "Z1"
 
@@ -114,24 +114,36 @@ MERGES = [
     "A57:H57",
     "C58:H65",
     # COMUNICACAO (67-70): as reguas mandaram 265 e-mails em dois dias e a aba
-    # nao mostrava nenhum. Cabe na area gerenciada atual (A1:H70) sem crescer.
+    # nao mostrava nenhum.
     "A67:H67",
     "A68:B69", "C68:D69", "E68:F69", "G68:H69",
     "A70:B70", "C70:D70", "E70:F70", "G70:H70",
+    # DE ONDE VEM O CRESCIMENTO (72-75)
+    "A72:H72",
+    "A73:B74", "C73:D74", "E73:F74", "G73:H74",
+    "A75:B75", "C75:D75", "E75:F75", "G75:H75",
+    # QUALIDADE DESSE CRESCIMENTO (77-80)
+    "A77:H77",
+    "A78:B79", "C78:D79", "E78:F79", "G78:H79",
+    "A80:B80", "C80:D80", "E80:F80", "G80:H80",
 ]
 
 # Faixas de "card" (numero + label compartilham o fundo suave)
 CARD_BANDS = ["A5:H7", "A8:H10", "A13:H15", "A18:E20", "A23:H25",
-              "A38:D40", "A43:H45", "A48:H50", "A53:H55", "A68:H70"]
+              "A38:D40", "A43:H45", "A48:H50", "A53:H55", "A68:H70",
+              "A73:H75", "A78:H80"]
 NUMBER_RANGES = ["A5:H6", "A8:H9", "A13:H14", "A18:E19", "A23:H24",
-                 "A38:D39", "A43:H44", "A48:H49", "A53:H54", "A68:H69"]
+                 "A38:D39", "A43:H44", "A48:H49", "A53:H54", "A68:H69",
+                 "A73:H74", "A78:H79"]
 LABEL_RANGES = ["A7:H7", "A10:H10", "A15:H15", "A20:E20", "A25:H25",
-                "A40:D40", "A45:H45", "A50:H50", "A55:H55", "A70:H70"]
+                "A40:D40", "A45:H45", "A50:H50", "A55:H55", "A70:H70",
+                "A75:H75", "A80:H80"]
 HEADER_RANGES = ["A4:H4", "A12:H12", "A17:H17", "A22:H22",
-                 "A37:H37", "A42:H42", "A47:H47", "A52:H52", "A67:H67"]
+                 "A37:H37", "A42:H42", "A47:H47", "A52:H52", "A67:H67",
+                 "A72:H72", "A77:H77"]
 # Percentual precisa de FRACAO na celula: escrever 5 com formato de % vira
 # 500,0%. Foi bug real na v6 e o reset visual nao limpa numberFormat sozinho.
-PERCENT_RANGES = ["E13:F14", "G13:H14", "E68:F69", "G68:H69"]
+PERCENT_RANGES = ["E13:F14", "G13:H14", "E68:F69", "G68:H69", "E78:F79"]
 
 
 def _fmt(range_, cell_format, fields):
@@ -147,9 +159,10 @@ def layout_requests(sheet_id, meta):
         "fields": "timeZone,locale"}})
 
     # PRIMEIRO request que toca a grade: cresce as linhas ANTES de qualquer
-    # coisa referenciar A1:H70. A aba nasceu com 60 linhas; um unmerge/repeatCell
-    # com endRowIndex acima disso faz a API rejeitar o BATCH INTEIRO.
-    # Idempotente: setar 80 quando ja e 80 nao faz nada.
+    # coisa referenciar AREA. A aba nasceu com 60 linhas; um unmerge/repeatCell
+    # com endRowIndex acima do rowCount atual faz a API rejeitar o BATCH INTEIRO.
+    # Idempotente: setar GRID_ROWS quando ja e esse valor nao faz nada.
+    # NAO REORDENAR: se este request sair de primeiro, o batch quebra no bump.
     req.append({"updateSheetProperties": {
         "properties": {"sheetId": sheet_id, "index": 0,
                        "tabColor": LARANJA,
@@ -374,6 +387,21 @@ def value_data(m, now_brt_naive):
         ("E68", [[m["mail_entrega_frac"]]]), ("G68", [[m["mail_voltaram_frac"]]]),
         ("A70", [["E-mails enviados"]]), ("C70", [["Nos últimos 7 dias"]]),
         ("E70", [["Taxa de entrega"]]), ("G70", [["Voltaram depois do e-mail"]]),
+        # A pergunta "os projetos estao subindo, e da Automatize?" custou um dia
+        # de apuracao duas vezes. Estes dois blocos respondem na aba.
+        ("A72", [["DE ONDE VEM O CRESCIMENTO — PROJETOS NOVOS EM 30 DIAS"]]),
+        ("A73", [[m["orig_automatize"]]]), ("C73", [[m["orig_leadlovers"]]]),
+        ("E73", [[m["orig_migrado"]]]), ("G73", [[m["orig_sem_atribuicao"]]]),
+        ("A75", [["Automatize"]]), ("C75", [["LeadLovers"]]),
+        ("E75", [["Base migrada"]]), ("G75", [["Sem origem registrada"]]),
+        # Sem a concentracao, "+102 projetos" parece a base inteira reagindo
+        # quando pode ser um cliente so subindo portfolio. As duas leituras
+        # levam a decisoes opostas.
+        ("A77", [["QUALIDADE DESSE CRESCIMENTO"]]),
+        ("A78", [[m["orig_projetos_novos"]]]), ("C78", [[m["orig_donos"]]]),
+        ("E78", [[m["orig_concentracao_frac"]]]), ("G78", [[m["orig_de_tocados"]]]),
+        ("A80", [["Projetos novos"]]), ("C80", [["Donos distintos"]]),
+        ("E80", [["Concentração do maior"]]), ("G80", [["De quem recebeu e-mail"]]),
     ]
     return [{"range": f"{DASH_TITLE}!{rng}", "values": vals} for rng, vals in d]
 
