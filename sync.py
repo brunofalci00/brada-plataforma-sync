@@ -482,10 +482,18 @@ def build_users(users_raw, login_index, projects_by_owner, issues):
         datas_proj = sorted([p for p in projetos if p])
         # Camadas de atribuicao (Sprint 1: utm/migrado/sem_atribuicao;
         # email_hubspot e janela entram no Sprint 2 com o modulo HubSpot)
+        # `referrer` fica ENTRE utm e sem_atribuicao de proposito: origem
+        # inferida do dominio nao pode ser lida como origem declarada. Passa a
+        # aparecer quando o T13 chegar em producao (hoje o front descarta o
+        # referrer de quem entra sem UTM, e por isso 33 de 41 cadastros desde
+        # 01/07 nao tem sinal nenhum).
+        ref_canal = norm_utm(attr.get("referrer_canal"))
         if is_migrado:
             camada = "migrado"
         elif utm_source:
             camada = "utm"
+        elif ref_canal:
+            camada = "referrer"
         else:
             camada = "sem_atribuicao"
         rows.append([
@@ -507,7 +515,11 @@ def build_users(users_raw, login_index, projects_by_owner, issues):
             str(attr.get("landing_path") or ""),
             referrer_dominio(attr.get("referrer")),
             camada,
-            origem_canal(utm_source, is_migrado),
+            # UTM declarada primeiro; canal inferido do referrer so quando nao
+            # ha UTM. `origem_camada` e quem diz COMO a gente sabe, `origem_canal`
+            # diz O QUE e — por isso os dois podem apontar pro mesmo canal com
+            # niveis de confianca diferentes.
+            origem_canal(utm_source or ref_canal, is_migrado),
             data_login,
             sim_nao(bool(last_ms)),
             sim_nao(ativo_30d),
