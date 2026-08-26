@@ -1,6 +1,6 @@
 name: Mutirao Rascunho -> Planilha do time
 
-# Refresh a cada 3h (deteccao de quem finalizou) + botao "Run workflow".
+# Refresh 2x por dia (deteccao de quem finalizou) + botao "Run workflow".
 # O merge em run normal escreve so AUTO/DESFECHO (race-safe; nao toca o MANUAL
 # do time). Full-rewrite keyed so quando uma linha some (exclusao de conta).
 #
@@ -12,7 +12,10 @@ name: Mutirao Rascunho -> Planilha do time
 
 on:
   schedule:
-    - cron: '0 */3 * * *'   # a cada 3 horas (UTC)
+    # 09h e 18h BRT: abre e fecha o dia de trabalho do time. Era '0 */3 * * *', 8
+    # rodadas por dia, contra a regra do Bruno de no maximo 2. Nao ha ordem a respeitar
+    # com o sync.yml: este script le o Firestore direto, nao a saida dele.
+    - cron: '0 12,21 * * *'
   workflow_dispatch: {}
 
 jobs:
