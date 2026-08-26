@@ -1,0 +1,32 @@
+name: Testes
+
+# Existe porque o repo nao tinha nenhum. O retry do Sheets tem ramos sutis (transitorio
+# contra permanente, teto de tentativas, backoff) e teste que nunca roda nao guarda nada.
+#
+# Nao toca em rede nem em planilha: tudo com fake e injecao de `dormir`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Rodar os testes
+        # Coleta tudo em vez de listar arquivo por arquivo: lista fixa esquece o proximo
+        # teste em silencio.
+        run: python -m pytest -q

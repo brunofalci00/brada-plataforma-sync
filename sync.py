@@ -191,6 +191,53 @@ def init_firebase_auth():
         return firebase_admin.get_app()
 
 
+# ---------------------------------------------------------------- Sheets: retry
+
+# O Google devolve 5xx e 429 de vez em quando e a rodada inteira morria por causa disso:
+# em 60 rodadas do "Mutirao Rascunho", 6 falharam com
+# `APIError: [503]: The service is currently unavailable`. O mesmo 503 derrubou o
+# `Sync HubSpot -> Sheets` em 26/08. Nenhuma dessas falhas era erro nosso.
+#
+# 4xx de permissao NAO entra na lista, de proposito. Retentar credencial errada ou
+# planilha sem acesso so atrasa em 35 segundos a descoberta de um problema que nao passa
+# sozinho — e problema que nao passa sozinho tem que aparecer na primeira tentativa.
+STATUS_TRANSITORIOS = frozenset({429, 500, 502, 503, 504})
+
+
+def _e_transitorio(erro):
+    """O erro passa sozinho se a gente esperar?
+
+    Erro sem `.response` (TypeError, KeyError, bug nosso) responde NAO: retentar quatro
+    vezes so esconderia o defeito atras de meio minuto de espera.
+    """
+    resposta = getattr(erro, "response", None)
+    return getattr(resposta, "status_code", None) in STATUS_TRANSITORIOS
+
+
+def com_retry(request, tentativas=4, espera_inicial=5, dormir=time.sleep):
+    """Envolve `HTTPClient.request` retentando so o que e transitorio.
+
+    Envolve o CLIENTE, e nao cada chamada: as chamadas ao Sheets estao espalhadas por
+    sete arquivos deste repo, e proteger uma a uma e garantia de esquecer alguma.
+
+    `dormir` e injetavel porque teste de backoff nao pode levar 35 segundos de verdade.
+    """
+    def _wrapper(*args, **kwargs):
+        espera = espera_inicial
+        for tentativa in range(1, tentativas + 1):
+            try:
+                return request(*args, **kwargs)
+            except Exception as erro:
+                if tentativa == tentativas or not _e_transitorio(erro):
+                    raise
+                codigo = getattr(getattr(erro, "response", None), "status_code", "?")
+                print(f"  [sheets] {codigo} na tentativa {tentativa}/{tentativas}; "
+                      f"aguardando {espera}s", flush=True)
+                dormir(espera)
+                espera *= 2
+    return _wrapper
+
+
 def get_sheets_client():
     import gspread
     from google.oauth2.service_account import Credentials
@@ -209,7 +256,11 @@ def get_sheets_client():
             "Credenciais Google Sheets nao encontradas "
             "(GOOGLE_SERVICE_ACCOUNT_JSON ou ~/.brada-secrets/sheets-sa.json)."
         )
-    return gspread.authorize(creds)
+    gc = gspread.authorize(creds)
+    # Um ponto so: `gspread.authorize` aparece uma unica vez no repo, entao envolver o
+    # `request` aqui cobre TODA chamada ao Sheets, dos sete arquivos, sem tocar em call site.
+    gc.http_client.request = com_retry(gc.http_client.request)
+    return gc
 
 # ===================================================
 # NORMALIZACAO
