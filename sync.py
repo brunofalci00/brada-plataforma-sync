@@ -31,6 +31,7 @@ import sys
 import time
 from collections import Counter
 from urllib.parse import urlparse
+import analytics_contract as analytics
 
 # gspread/google-auth/firestore importados lazy pra --help rodar sem deps.
 
@@ -66,8 +67,8 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 
 # Endpoint de leads da Automatize (export-leads-automatize). Token via env
 # AUTOMATIZE_ENDPOINT_TOKEN (secret no CI; ~/.brada-secrets/plataforma-sync.env local).
-# Cap confirmado de 1000/resposta SEM paginacao -> ingestao incremental por janela
-# + dedup por lead_id (o forward acumula apesar do cap). Validado ao vivo 27/07.
+# Cap confirmado de 1000/resposta SEM paginacao. A deduplicacao preserva recebidos,
+# mas NAO prova completude; o servidor pode ignorar a janela (revalidado 30/08).
 AUTOMATIZE_ENDPOINT_URL = os.environ.get(
     "AUTOMATIZE_ENDPOINT_URL",
     "https://n8n-webhook.painel.automatizenow.io/webhook/export-leads-automatize",
@@ -126,6 +127,7 @@ HEADER_PROJECTS = [
     "dados_em_atualizacao",
     # No fim de proposito: fonte do Looker so ganha campo, nao quebra.
     "n_campos_faltando", "campos_faltando",
+    "inicio_observacao", "primeira_publicacao_observada", "primeira_aptidao_observada",
 ]
 
 HEADER_PROPOSALS = [
@@ -381,7 +383,7 @@ def origem_canal(utm_source, is_migrado):
         return "meta_ads"
     if src:
         return "outro"
-    return "migrado" if is_migrado else "organico"
+    return "migrado" if is_migrado else "sem_atribuicao"
 
 
 def sim_nao(b):
@@ -666,7 +668,11 @@ def build_migracao(antiga_rows, projects_raw, users_by_id, login_index, today_st
         "antiga_baseline": baseline_n,
         "mig_visiveis_por_status": dict(mig_visiveis),
         "mig_visiveis": sum(mig_visiveis.values()),
-        "retencao_frac": round(sum(mig_visiveis.values()) / baseline_n, 4) if baseline_n else 0,
+        "baseline_visiveis": sum(1 for r in rows if r[3] == "sim" and r[4] == "sim"
+                                 and r[5] not in ("", "Rascunho")),
+        "retencao_frac": (round(sum(1 for r in rows if r[3] == "sim" and r[4] == "sim"
+                                   and r[5] not in ("", "Rascunho")) / baseline_n, 4)
+                          if baseline_n else ""),
         "base_total": base_total,
         "base_logou": base_logou,
         "base_logou_frac": round(base_logou / base_total, 4) if base_total else 0,
@@ -679,11 +685,12 @@ def build_migracao(antiga_rows, projects_raw, users_by_id, login_index, today_st
 def load_automatize_leads(now_brt, issues):
     """Puxa leads do endpoint da Automatize (incremental por janela; cap de
     1000/resposta sem paginacao). Retorna lista de dicts ou None. None (falha,
-    sem token, formato) faz o sync PULAR a aba sem sobrescrever o historico.
+    sem token, formato) preserva os atributos recebidos; o join com a plataforma
+    continua sendo recalculado sobre o historico, mesmo quando a fonte falha.
     NUNCA loga token / URL-com-token / body."""
     if not AUTOMATIZE_ENDPOINT_TOKEN:
         issues["endpoint_automatize"]["sem_token"] = 1
-        print("  leads_automatize: sem AUTOMATIZE_ENDPOINT_TOKEN -> aba nao tocada")
+        print("  leads_automatize: sem AUTOMATIZE_ENDPOINT_TOKEN -> recebidos preservados; join recalculado")
         return None
     import requests
 
@@ -698,17 +705,17 @@ def load_automatize_leads(now_brt, issues):
         )
     except Exception as e:  # noqa: BLE001 (falha de rede nao pode quebrar o sync)
         issues["endpoint_automatize"][f"conexao_{type(e).__name__}"] = 1
-        print(f"  leads_automatize: erro de conexao ({type(e).__name__}) -> aba nao tocada")
+        print(f"  leads_automatize: erro de conexao ({type(e).__name__}) -> recebidos preservados; join recalculado")
         return None
     if r.status_code != 200:
         issues["endpoint_automatize"][f"http_{r.status_code}"] = 1
-        print(f"  leads_automatize: HTTP {r.status_code} -> aba nao tocada (body/token nao logados)")
+        print(f"  leads_automatize: HTTP {r.status_code} -> recebidos preservados; join recalculado (body/token nao logados)")
         return None
     try:
         data = r.json()
     except ValueError:
         issues["endpoint_automatize"]["json_invalido"] = 1
-        print("  leads_automatize: resposta nao-JSON -> aba nao tocada")
+        print("  leads_automatize: resposta nao-JSON -> recebidos preservados; join recalculado")
         return None
     if isinstance(data, dict):
         for k in ("data", "leads", "results", "items"):
@@ -717,7 +724,7 @@ def load_automatize_leads(now_brt, issues):
                 break
     if not isinstance(data, list):
         issues["endpoint_automatize"]["formato_inesperado"] = 1
-        print("  leads_automatize: payload nao e array -> aba nao tocada")
+        print("  leads_automatize: payload nao e array -> recebidos preservados; join recalculado")
         return None
     if len(data) >= 1000:
         issues["endpoint_automatize"]["possivel_truncamento_1000"] = len(data)
@@ -782,6 +789,7 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
     u = {h: i for i, h in enumerate(HEADER_USERS)}
     p = {h: i for i, h in enumerate(HEADER_PROJECTS)}
     q = {h: i for i, h in enumerate(HEADER_PROPOSALS)}
+    proposals_rows = [r for r in proposals_rows if not analytics.proposta_teste(dict(zip(HEADER_PROPOSALS, r)))]
     snap = []
 
     def add(metrica, segmento, valor):
@@ -806,9 +814,7 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
 
     for status, n in sorted(Counter(r[q["status"]] or "(vazio)" for r in proposals_rows).items()):
         add("proposals_por_status", status, n)
-    total_aprovado = sum(r[q["valor_aprovado"]] for r in proposals_rows
-                         if r[q["status"]].lower() == "aprovado" and r[q["valor_aprovado"]] != "")
-    add("valor_aprovado_total", "(todos)", round(total_aprovado, 2))
+    add("valor_aprovado_total", "(todos)", analytics.valor_aprovado(analytics.records(HEADER_PROPOSALS, proposals_rows)))
 
     # Cobertura de atribuicao sobre cadastros novos (nao-migrados)
     novos = [r for r in users_rows if r[u["is_migrado"]] == "nao"]
@@ -834,7 +840,7 @@ def serie_semanal(snap_all, metrica, now_brt, segmento="(todos)"):
 
     Le do historico do snap_diario porque nao da pra reconstruir retroativamente:
     `data_ultimo_login` guarda so o ultimo acesso, entao recalcular semanas
-    passadas a partir dele subconta. Semana sem snapshot vira 0.
+    passadas a partir dele subconta. Semana sem snapshot fica indisponível.
     """
     por_data = {}
     for r in snap_all:
@@ -850,11 +856,11 @@ def serie_semanal(snap_all, metrica, now_brt, segmento="(todos)"):
         ini = monday - datetime.timedelta(weeks=i)
         fim = ini + datetime.timedelta(days=7)
         dentro = [d for d in por_data if ini.isoformat() <= d < fim.isoformat()]
-        bruto = por_data[max(dentro)] if dentro else 0
+        bruto = por_data[max(dentro)] if dentro else None
         try:
             valor = int(float(bruto))
         except (TypeError, ValueError):
-            valor = 0
+            valor = ""
         out.append((ini.strftime("%d/%m"), valor))
     return out
 
@@ -865,6 +871,11 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     u = {h: i for i, h in enumerate(HEADER_USERS)}
     p = {h: i for i, h in enumerate(HEADER_PROJECTS)}
     q = {h: i for i, h in enumerate(HEADER_PROPOSALS)}
+    proposals_rows = [r for r in proposals_rows if not analytics.proposta_teste(dict(zip(HEADER_PROPOSALS, r)))]
+    user_records = analytics.records(HEADER_USERS, users_rows)
+    project_records = analytics.records(HEADER_PROJECTS, projects_rows)
+    funnel = analytics.funil_pessoas(user_records, project_records)
+    auto = analytics.funil_pessoas([r for r in user_records if r.get("origem_canal") == "automatize"], project_records)
 
     st = Counter(r[p["status"]] for r in projects_rows)
     exp = Counter(r[p["expiracao_situacao"]] for r in projects_rows)
@@ -873,7 +884,7 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     # status Disponivel ou Em Execucao E captacao nao expirada.
     ativos = sum(1 for r in projects_rows
                  if r[p["status"]] in ("Disponível", "Em Execução")
-                 and r[p["expiracao_situacao"]] != "expirado")
+                 and r[p["expiracao_situacao"]] == "vigente")
 
     # --- Coorte de expiracao: o que vence quando (cumulativo) ---------------
     # Mesmo universo de `ativos`, pra a coorte falar dos mesmos projetos do card
@@ -906,8 +917,8 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     mes = now_brt.strftime("%Y-%m")
     mes_ant = (now_brt.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
 
-    canais = {"organico": 0, "leadlovers": 0, "automatize": 0, "meta_ads": 0,
-              "instagram": 0, "comercial": 0, "outro": 0}
+    canais = {"sem_atribuicao": 0, "leadlovers": 0, "automatize": 0, "meta_ads": 0,
+              "instagram": 0, "comercial": 0, "site": 0, "outro": 0}
     for r in novos:
         c = r[u["origem_canal"]]
         if c in canais:
@@ -924,6 +935,10 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         semanas.append((ini.strftime("%d/%m"), n))
 
     return {
+        "funil": funnel,
+        "automatize": auto,
+        "mes_atual_rotulo": now_brt.strftime("01/%m a %d/%m (parcial)"),
+        "mes_anterior_rotulo": (now_brt.replace(day=1) - datetime.timedelta(days=1)).strftime("%m/%Y completo"),
         "proj_total": len(projects_rows),
         "proj_ativos": ativos,
         "st_disponivel": st.get("Disponível", 0),
@@ -939,18 +954,17 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "vence_60d": vencem_ate(60),
         "vence_90d": vencem_ate(90),
         "vence_180d": vencem_ate(180),
-        "funil_cadastraram": len(ongs),
+        "funil_cadastraram": funnel["cadastros"],
         "funil_acessaram": sum(1 for r in ongs if r[u["logou_alguma_vez"]] == "sim"),
-        "funil_com_projeto": sum(1 for r in ongs if r[u["tem_projeto"]] == "sim"),
-        "funil_publicaram": sum(1 for r in ongs if r[u["user_hash"]] in donos_publicados),
+        "funil_com_projeto": funnel["criaram"],
+        "funil_publicaram": funnel["publicaram"],
+        "funil_aptos": funnel["aptos"],
         "rasc_sem_diario": rasc_sem("Arquivo do Diário Oficial"),
         "rasc_sem_descricao": rasc_sem("Descrição"),
         "rasc_sem_orcamento": rasc_sem("Orçamento estimado"),
         "rasc_perto": sum(1 for r in rascunhos if 0 < int(r[p["n_campos_faltando"]] or 0) <= 3),
         "prop_aprovadas": sum(1 for r in proposals_rows if r[q["status"]].lower() == "aprovado"),
-        "prop_valor": round(sum(r[q["valor_aprovado"]] for r in proposals_rows
-                                if r[q["status"]].lower() == "aprovado"
-                                and r[q["valor_aprovado"]] != ""), 2),
+        "prop_valor": analytics.valor_aprovado(analytics.records(HEADER_PROPOSALS, proposals_rows)),
         "n_migrados": len(users_rows) - len(novos),
         "novos_total": len(novos),
         "novos_mes": sum(1 for r in novos if r[u["data_cadastro"]][:7] == mes),
@@ -1096,16 +1110,20 @@ def metricas_email(db, login_index, primeiro_envio, now_brt):
             # hoje sao 49 erros, TODOS reenviados, e a taxa real e 100%.
             erro += 1
 
-    # Voltou = ultimo acesso no Auth e POSTERIOR ao primeiro e-mail que mandamos.
-    voltaram = sum(1 for uid, ms in primeiro_envio.items()
-                   if (login_index.get(uid) or 0) > ms)
+    # Limite inferior OBSERVADO, não histórico completo de acessos nem causalidade.
+    # Só coortes com sete dias completos de acompanhamento.
+    janela = 7 * 86400 * 1000
+    maduras = {uid: ms for uid, ms in primeiro_envio.items()
+               if ms + janela <= int(now_brt.timestamp() * 1000)}
+    voltaram = sum(1 for uid, ms in maduras.items()
+                   if ms < (login_index.get(uid) or 0) <= ms + janela)
 
     return {
         "mail_total": total,
         "mail_7d": recentes,
-        "mail_entrega_frac": round(ok / (ok + erro), 4) if (ok + erro) else 0,
-        "mail_voltaram_frac": (round(voltaram / len(primeiro_envio), 4)
-                               if primeiro_envio else 0),
+        "mail_entrega_frac": round(ok / (ok + erro), 4) if (ok + erro) else "",
+        "mail_voltaram_frac": (round(voltaram / len(maduras), 4) if maduras else ""),
+        "mail_janela_n": len(maduras),
     }
 
 
@@ -1239,8 +1257,10 @@ def write_overwrite(sh, name, header, rows):
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=name, rows=max(1000, len(rows) + 100),
                               cols=max(len(header), 4))
-    ws.clear()
-    ws.update(values=[header] + rows, range_name="A1")
+    if ws.row_count < len(rows) + 1 or ws.col_count < len(header):
+        ws.resize(rows=max(ws.row_count, len(rows) + 100), cols=max(ws.col_count, len(header)))
+    sh.batch_update({"requests": [analytics.atomic_replace_request(
+        ws.id, ws.row_count, ws.col_count, header, rows)]})
     print(f"  {name}: {len(rows)} linhas (overwrite)")
 
 
@@ -1259,8 +1279,7 @@ def write_snapshot_idempotente(sh, snap_rows, today_str):
     kept = [r for r in existing[1:] if r and r[0] != today_str] if existing else []
     all_rows = kept + snap_rows
     all_rows.sort(key=lambda r: (str(r[0]), str(r[1]), str(r[2])))
-    ws.clear()
-    ws.update(values=[HEADER_SNAP] + all_rows, range_name="A1")
+    write_overwrite(sh, name, HEADER_SNAP, all_rows)
     print(f"  snap_diario: {len(snap_rows)} linhas de {today_str} "
           f"(+{len(kept)} historicas preservadas)")
     # Devolve o historico mesclado: e a unica fonte da serie semanal do dashboard,
@@ -1271,7 +1290,7 @@ def write_snapshot_idempotente(sh, snap_rows, today_str):
 def write_leads_dedup(sh, header, new_rows):
     """Append idempotente por lead_id (coluna 0): preserva leads ja vistos e
     substitui os que voltaram no pull (dado mais fresco vence). Acumula o
-    forward completo apesar do cap de 1000/pull. Ordena por coletado_em desc."""
+    historico observado; o cap impede garantir completude. Ordena por coletado_em desc."""
     import gspread
 
     name = "raw_leads_automatize"
@@ -1292,8 +1311,7 @@ def write_leads_dedup(sh, header, new_rows):
     col_col = header.index("coletado_em")
     all_rows = sorted(by_id.values(), key=lambda r: str(r[col_col]) if len(r) > col_col else "",
                       reverse=True)
-    ws.clear()
-    ws.update(values=[header] + all_rows, range_name="A1")
+    write_overwrite(sh, name, header, all_rows)
     print(f"  raw_leads_automatize: {len(new_rows)} do pull | {len(all_rows)} no total "
           f"(historico anterior: {n_hist_antes})")
 
@@ -1301,11 +1319,26 @@ def write_leads_dedup(sh, header, new_rows):
 # MAIN
 # ===================================================
 
+def read_existing(sh, name, required=()):
+    import gspread
+    try:
+        values = sh.worksheet(name).get_all_values()
+    except gspread.exceptions.WorksheetNotFound:
+        return [], []
+    if not values:
+        return [], []
+    if any(column not in values[0] for column in required):
+        raise ValueError(f"Contrato de cabeçalho alterado: {name}; nada escrito")
+    return values[0], values[1:]
+
 def main():
     ap = argparse.ArgumentParser(description="Sync Plataforma Brada -> Sheets")
     ap.add_argument("--dry-run", action="store_true",
                     help="Le Firestore/Auth e imprime distribuicoes, sem escrever no Sheets")
+    ap.add_argument("--output-dir", help="Com --dry-run: salva candidato pseudonimizado para integração local, fora do repositório")
     args = ap.parse_args()
+    if args.output_dir and not args.dry_run:
+        ap.error('--output-dir exige --dry-run')
 
     t0 = time.time()
     today_str = datetime.datetime.now(BRT).strftime("%Y-%m-%d")
@@ -1335,12 +1368,26 @@ def main():
     # Planilha da plataforma ANTIGA (KPI comparativo de migracao)
     import fonte_antiga
     gc = get_sheets_client()
+    if not SPREADSHEET_ID:
+        raise SystemExit("SPREADSHEET_ID ausente")
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    old_meta_header, old_meta_rows = read_existing(sh, "meta_sync", HEADER_META)
+    old_meta = {r[0]: r[1] for r in old_meta_rows if len(r) > 1}
+    old_project_header, old_project_rows = read_existing(sh, "raw_projects", ["project_hash", "status"])
+    old_lead_header, old_lead_rows = read_existing(sh, "raw_leads_automatize", HEADER_LEADS_AUTOMATIZE)
+    _, old_snap_rows = read_existing(sh, "snap_diario", HEADER_SNAP)
     antiga_rows = fonte_antiga.carregar_planilha(gc)
     print(f"planilha antiga: {len(antiga_rows)} projetos")
 
     users_by_id = {doc_id: d for doc_id, d in users_raw}
     projects_rows, projects_by_owner = build_projects(projects_raw, users_by_id, today_str, issues)
     users_rows = build_users(users_raw, login_index, projects_by_owner, issues)
+    observed_at = datetime.datetime.now(BRT).isoformat(timespec="seconds")
+    observed = analytics.observe_projects(
+        analytics.records(HEADER_PROJECTS, projects_rows),
+        analytics.records(old_project_header, old_project_rows), observed_at)
+    projects_rows = [[p.get(h, "") for h in HEADER_PROJECTS] for p in observed]
+    analytics.validate_source_counts({"n_users": len(users_rows), "n_projects": len(projects_rows)}, old_meta)
     proposals_rows = build_proposals(proposals_raw, grants_raw, issues)
     mig_rows, mig_metrics = build_migracao(antiga_rows, projects_raw, users_by_id,
                                            login_index, today_str)
@@ -1360,10 +1407,20 @@ def main():
             print(f"  raw_leads_automatize: {len(_leads_pii)} hit(s) de PII -> aba PULADA (sem abortar)")
             leads_rows = None
 
+    leads_ok = leads_rows is not None
+    merged_leads = analytics.merge_leads(
+        analytics.records(old_lead_header, old_lead_rows),
+        analytics.records(HEADER_LEADS_AUTOMATIZE, leads_rows or []),
+        analytics.records(HEADER_USERS, users_rows))
+    leads_rows = [[row.get(h, "") for h in HEADER_LEADS_AUTOMATIZE] for row in merged_leads]
+    health = analytics.source_health(old_meta, leads_ok, observed_at, issues["endpoint_automatize"])
+
     snap_rows = build_snapshot(users_rows, projects_rows, proposals_rows, today_str,
                                mig=mig_metrics)
 
     meta_rows = [
+        ["publicacao_estado", "concluida"],
+        ["publicacao_id", observed_at],
         ["ultima_execucao_brt", datetime.datetime.now(BRT).strftime("%d/%m/%Y %H:%M")],
         ["duracao_s", round(time.time() - t0, 1)],
         ["n_users", len(users_rows)],
@@ -1371,6 +1428,7 @@ def main():
         ["n_proposals", len(proposals_rows)],
         ["snapshot_data", today_str],
     ]
+    meta_rows.extend([[key, value] for key, value in health.items()])
     if leads_rows is not None:
         meta_rows.append(["n_leads_automatize", len(leads_rows)])
     for k, counter in issues.items():
@@ -1384,6 +1442,7 @@ def main():
         "raw_migracao_projetos": (HEADER_MIGRACAO, mig_rows),
         "snap_diario": (HEADER_SNAP, snap_rows),
         "meta_sync": (HEADER_META, meta_rows),
+        "raw_leads_automatize": (HEADER_LEADS_AUTOMATIZE, leads_rows),
     }
     pii_guard(tabs)
     print("pii_guard: OK (zero hits)")
@@ -1402,12 +1461,30 @@ def main():
     metrics.update(metricas_email(db, login_index, primeiro_envio, now_brt))
     metrics.update(metricas_origem(projects_raw, users_raw, primeiro_envio, now_brt))
     metrics.update(mig_metrics)  # bloco MIGRACAO da aba Dashboard
+    metrics["fontes"] = health
+    metrics["leads_total"] = len(leads_rows)
+    metrics["leads_cadastrados"] = sum(r.get("cadastrou_plataforma") == "sim" for r in merged_leads)
+    metrics["leads_com_projeto"] = sum(r.get("tem_projeto_plataforma") == "sim" for r in merged_leads)
+    metrics["automatize_sem_lead"] = sum(
+        r.get("origem_canal") == "automatize" and r.get("utm_term") not in {l.get("lead_id") for l in merged_leads}
+        for r in analytics.records(HEADER_USERS, users_rows))
     # Serie semanal: fallback so com o snapshot de hoje (dry-run e seguranca contra
     # KeyError em value_data). E sobrescrita logo apos a escrita do snap_diario,
     # que devolve o historico completo.
-    metrics["semanas_ativos"] = serie_semanal(snap_rows, "users_ativos_30d", now_brt)
+    snap_historico = [r for r in old_snap_rows if r and r[0] != today_str] + snap_rows
+    metrics["semanas_ativos"] = serie_semanal(snap_historico, "users_ativos_30d", now_brt)
 
     if args.dry_run:
+        if args.output_dir:
+            from pathlib import Path
+            target = Path(args.output_dir).resolve()
+            if target == Path(__file__).parent.resolve() or Path(__file__).parent.resolve() in target.parents:
+                raise ValueError('Candidato deve ficar fora do repositório público')
+            target.mkdir(parents=True, exist_ok=True)
+            candidate = {'spreadsheet_id': SPREADSHEET_ID, 'observed_at': observed_at,
+                         'metrics': metrics, 'tabs': {name: {'header': h, 'rows': r} for name, (h, r) in tabs.items()}}
+            candidate['tabs']['snap_diario']['rows'] = snap_historico
+            (target / 'candidate.json').write_text(json.dumps(candidate, ensure_ascii=False), encoding='utf-8')
         u = {h: i for i, h in enumerate(HEADER_USERS)}
         p = {h: i for i, h in enumerate(HEADER_PROJECTS)}
         print(f"[dry-run] users={len(users_rows)} projects={len(projects_rows)} "
@@ -1439,20 +1516,23 @@ def main():
     if not SPREADSHEET_ID:
         raise SystemExit("SPREADSHEET_ID ausente (env ou ~/.brada-secrets/plataforma-sync.env).")
     sh = gc.open_by_key(SPREADSHEET_ID)
+    # Leitor do BI recusa gerações em construção. Só o último passo libera a nova foto.
+    in_progress = {**old_meta, "publicacao_estado": "em_andamento", "publicacao_id": observed_at}
+    write_overwrite(sh, "meta_sync", HEADER_META, [[key, value] for key, value in in_progress.items()])
     write_overwrite(sh, "raw_users", HEADER_USERS, users_rows)
     write_overwrite(sh, "raw_projects", HEADER_PROJECTS, projects_rows)
     write_overwrite(sh, "raw_proposals", HEADER_PROPOSALS, proposals_rows)
     write_overwrite(sh, "raw_migracao_projetos", HEADER_MIGRACAO, mig_rows)
-    snap_historico = write_snapshot_idempotente(sh, snap_rows, today_str)
+    write_overwrite(sh, "snap_diario", HEADER_SNAP, snap_historico)
     metrics["semanas_ativos"] = serie_semanal(snap_historico, "users_ativos_30d", now_brt)
-    write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
-    # Leads da Automatize (append+dedup). Externo -> nao aborta o sync; se None
-    # (falha/sem token/PII) a aba fica intocada, preservando o historico.
+    # Histórico acumulado, com join recalculado contra a foto atual. Falha externa
+    # preserva atributos recebidos e fica explícita no manifesto de cobertura.
     if leads_rows is not None:
-        write_leads_dedup(sh, HEADER_LEADS_AUTOMATIZE, leads_rows)
+        write_overwrite(sh, "raw_leads_automatize", HEADER_LEADS_AUTOMATIZE, leads_rows)
     # Dashboard POR ULTIMO: o carimbo de atualizacao so avanca se tudo acima passou
     import dashboard_layout
     status_layout = dashboard_layout.ensure_dashboard(sh, metrics, now_brt.replace(tzinfo=None))
+    write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
     print(f"  Dashboard: valores atualizados | {status_layout}")
     print(f"plataforma_sync: OK | users={len(users_rows)} projects={len(projects_rows)} "
           f"proposals={len(proposals_rows)} | {round(time.time() - t0, 1)}s")

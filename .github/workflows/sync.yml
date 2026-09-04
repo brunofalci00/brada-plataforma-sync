@@ -1,5 +1,9 @@
 name: Sync Plataforma -> Sheets
 
+concurrency:
+  group: plataforma-sheets-publication
+  cancel-in-progress: false
+
 on:
   schedule:
     - cron: '15 9 * * *'  # 09:15 UTC = 06:15 BRT (diario; snapshot do dia)
@@ -16,7 +20,10 @@ jobs:
           python-version: '3.12'
 
       - name: Instalar dependencias
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest
+
+      - name: Validar contrato de analytics
+        run: pytest -q test_analytics_contract.py test_sheets_retry.py
 
       - name: Sync Plataforma -> Sheets
         env:
