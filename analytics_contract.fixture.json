@@ -1,0 +1,92 @@
+{
+  "contract": "2026-09-04.v1",
+  "users": [
+    {
+      "user_hash": "a",
+      "role": "ONG",
+      "is_migrado": "nao",
+      "origem_canal": "automatize"
+    },
+    {
+      "user_hash": "b",
+      "role": "ONG",
+      "is_migrado": "nao",
+      "origem_canal": "automatize"
+    },
+    {
+      "user_hash": "c",
+      "role": "ONG",
+      "is_migrado": "nao",
+      "origem_canal": "automatize"
+    },
+    {
+      "user_hash": "d",
+      "role": "ONG",
+      "is_migrado": "nao",
+      "origem_canal": "sem_atribuicao"
+    },
+    {
+      "user_hash": "e",
+      "role": "ONG",
+      "is_migrado": "sim"
+    },
+    {
+      "user_hash": "admin",
+      "role": "SUPER_ADMIN",
+      "is_migrado": "nao"
+    }
+  ],
+  "projects": [
+    {
+      "project_hash": "p1",
+      "owner_hash": "a",
+      "status": "Rascunho",
+      "expiracao_situacao": "vigente"
+    },
+    {
+      "project_hash": "p2",
+      "owner_hash": "a",
+      "status": "Disponível",
+      "expiracao_situacao": "vigente"
+    },
+    {
+      "project_hash": "p3",
+      "owner_hash": "a",
+      "status": "Em Execução",
+      "expiracao_situacao": "vigente"
+    },
+    {
+      "project_hash": "p4",
+      "owner_hash": "b",
+      "status": "Disponível",
+      "expiracao_situacao": "expirado"
+    },
+    {
+      "project_hash": "p5",
+      "owner_hash": "c",
+      "status": "Rascunho",
+      "expiracao_situacao": "sem_data"
+    },
+    {
+      "project_hash": "p6",
+      "owner_hash": "e",
+      "status": "Disponível",
+      "expiracao_situacao": "vigente"
+    },
+    {
+      "project_hash": "p4",
+      "owner_hash": "b",
+      "status": "Disponível",
+      "expiracao_situacao": "expirado"
+    }
+  ],
+  "expected": {
+    "cadastros": 4,
+    "criaram": 3,
+    "publicaram": 2,
+    "aptos": 1,
+    "projetos": 5,
+    "projetos_aptos": 2,
+    "maior_proprietario": 3
+  }
+}
