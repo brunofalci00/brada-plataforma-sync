@@ -223,7 +223,12 @@ def test_snap_grava_os_grupos_de_estoque_com_os_mesmos_numeros_dos_cartoes():
               + [_projeto("Disponível", "expirado")] * 3
               + [_projeto("Em Execução", "sem_data")]
               + [_projeto("Rascunho", "expirado")] * 4
-              + [_projeto("Concluído", "vigente")] * 2)
+              + [_projeto("Concluído", "vigente")] * 2
+              # Sobra proposital: o grupo do resto precisa ser comparado com valor,
+              # e nao zero contra zero. "Aprovado" e status conhecido sem balde;
+              # status vazio e o tipo de linha que um filtro futuro descartaria em
+              # uma das duas superficies e nao na outra, e a trava tem que ver isso.
+              + [_projeto("Aprovado", "vigente"), _projeto("", "vigente")])
     snap = sync.build_snapshot([], linhas, [], "2026-09-08")
     grupos = _segmentos(snap, "projects_por_estoque")
     m = sync.compute_dashboard_metrics([], linhas, [], datetime.datetime(2026, 9, 8, tzinfo=sync.BRT))
@@ -233,7 +238,9 @@ def test_snap_grava_os_grupos_de_estoque_com_os_mesmos_numeros_dos_cartoes():
     assert grupos["sem_prazo"] == m["proj_sem_prazo"] == 1
     assert grupos["rascunho"] == m["st_rascunho"] == 4
     assert grupos["concluido"] == m["st_concluido"] == 2
-    assert grupos["fora_dos_grupos"] == m["proj_fora_dos_grupos"] == 0
+    assert grupos["fora_dos_grupos"] == m["proj_fora_dos_grupos"] == 2
+    # Particao completa nas duas superficies, sobre as MESMAS linhas.
+    assert sum(grupos.values()) == m["proj_total"] == len(linhas)
 
 
 def test_snap_de_um_dia_reconstroi_o_estoque_sozinho():
