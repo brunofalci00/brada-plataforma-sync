@@ -163,8 +163,17 @@ def _dias_desde(ts, hoje: dt.date):
     try:
         # `astimezone(BRT)` e nao `.date()` cru: o `enviadoEm` e um timestamp
         # do servidor em UTC, e um envio das 22h BRT cai no dia seguinte em UTC.
-        d = (ts.astimezone(BRT).date() if isinstance(ts, dt.datetime)
-             else dt.date.fromisoformat(str(ts)[:10]))
+        if isinstance(ts, dt.datetime):
+            # Naive lido como UTC, mesma convencao de `sync._ts_ms` e
+            # `sync.to_date`. `astimezone` sozinho assume a hora LOCAL do
+            # processo quando o datetime nao tem fuso, que e o vies que esta
+            # linha veio corrigir: sem o `replace`, o mesmo `enviadoEm` sem
+            # tzinfo daria idades diferentes aqui (BRT) e no runner (UTC).
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=dt.timezone.utc)
+            d = ts.astimezone(BRT).date()
+        else:
+            d = dt.date.fromisoformat(str(ts)[:10])
     except Exception:
         return None
     return (hoje - d).days

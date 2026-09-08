@@ -337,8 +337,24 @@ def _ts_ms(v):
             return int(v.timestamp() * 1000)
         if hasattr(v, "timestamp"):  # Timestamp de outra lib, ja com fuso
             return int(v.timestamp() * 1000)
-        d = datetime.datetime.fromisoformat(str(v)[:19])
-        return int(d.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
+        s = str(v).strip()
+        # Epoch em ms ja pronto, defensivo igual `to_date`. Sem este ramo um
+        # `lastLogin` gravado como numero (o front e JS, e `Date.now()` devolve
+        # numero) vira None, e a pessoa reaparece como "nunca acessou" — que e
+        # exatamente o defeito que este indice existe para evitar.
+        if re.match(r"^\d{12,13}$", s):
+            return int(s)
+        # Offset explicito PRESERVADO. `str(v)[:19]` cortava o "-03:00" e
+        # carimbava UTC no que sobrava, errando o instante em tres horas; perto
+        # da meia-noite isso vira um dia inteiro na data do acesso. `to_date`,
+        # que este docstring diz espelhar, sempre respeitou o offset.
+        try:
+            d = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            d = datetime.datetime.fromisoformat(s[:19])
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=datetime.timezone.utc)
+        return int(d.timestamp() * 1000)
     except Exception:
         return None
 

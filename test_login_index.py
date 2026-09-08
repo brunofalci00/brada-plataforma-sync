@@ -278,6 +278,53 @@ def test_dedup_mede_a_idade_do_envio_em_brt():
     assert filtros._dias_desde(enviado, dt.date(2026, 9, 8)) == 0
 
 
+def test_ts_ms_respeita_o_offset_escrito_na_string():
+    """String ISO com offset nao pode ser truncada e recarimbada como UTC.
+
+    Cortar em 19 caracteres joga fora o "-03:00", e o que sobra e lido como
+    UTC: o instante anda tres horas e, perto da meia-noite, a data do acesso
+    anda um dia. Vale para qualquer offset, nao so o de Brasilia.
+    """
+    for texto, instante in (
+        ("2026-09-08T23:30:00-03:00", dt.datetime(2026, 9, 9, 2, 30, tzinfo=UTC)),
+        ("2026-09-08T23:30:00+05:30", dt.datetime(2026, 9, 8, 18, 0, tzinfo=UTC)),
+        ("2026-09-08T23:30:00+00:00", dt.datetime(2026, 9, 8, 23, 30, tzinfo=UTC)),
+        ("2026-09-08T23:30:00Z", dt.datetime(2026, 9, 8, 23, 30, tzinfo=UTC)),
+        ("2026-09-08T23:30:00", dt.datetime(2026, 9, 8, 23, 30, tzinfo=UTC)),
+    ):
+        assert sync._ts_ms(texto) == int(instante.timestamp() * 1000), texto
+
+
+def test_ts_ms_le_epoch_em_ms_em_vez_de_dizer_nunca_acessou():
+    """Numero cru nao pode virar None: None aqui significa "nunca acessou".
+
+    O `lastLogin` e escrito pelo front, que e JS, e `Date.now()` devolve
+    numero. Se um dia chegar assim, silenciar o valor manda a pessoa de volta
+    para a fila dos sumidos — o defeito que este indice existe para evitar.
+    """
+    instante = dt.datetime(2026, 9, 8, 12, 50, tzinfo=UTC)
+    ms = int(instante.timestamp() * 1000)
+
+    assert sync._ts_ms(ms) == ms
+    assert sync._ts_ms(str(ms)) == ms
+    # O que NAO e timestamp continua None, em vez de virar uma data qualquer.
+    for lixo in ("ontem de tarde", "", "   ", None, True, 42, [], {}):
+        assert sync._ts_ms(lixo) is None, repr(lixo)
+
+
+def test_dedup_le_enviadoem_sem_fuso_como_utc():
+    """`enviadoEm` sem tzinfo tem que dar a mesma idade do instante com fuso.
+
+    Num datetime naive o `astimezone` assume a hora LOCAL, e a janela de dedup
+    de 14 dias volta a depender de onde a regua roda.
+    """
+    aware = dt.datetime(2026, 9, 9, 1, 0, tzinfo=UTC)   # 08/09 22:00 em BRT
+    naive = dt.datetime(2026, 9, 9, 1, 0)               # mesmo instante, sem fuso
+    hoje = dt.date(2026, 9, 9)
+
+    assert filtros._dias_desde(naive, hoje) == filtros._dias_desde(aware, hoje) == 1
+
+
 # --------------------------------------------------------------------------- #
 # 3. Efeito nas colunas de `raw_users` (dashboard de KPIs)
 # --------------------------------------------------------------------------- #
