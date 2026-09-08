@@ -1,7 +1,10 @@
 """Resumo executivo v7. Layout e valores juntos; somente A:H e Z1 são gerenciados."""
 import datetime
 
-VERSION = "v7.1-analytics"
+# Bump obrigatorio quando muda a FORMA da aba: `publish` so reaplica layout se o
+# Z1 divergir, e sem isso a caixa mesclada do 4o cartao da linha 26 (que saiu)
+# ficaria formatada e vazia na planilha.
+VERSION = "v7.2-analytics"
 ROWS = 145
 ORANGE = {"red": .773, "green": .353, "blue": .067}
 INK = {"red": .27, "green": .27, "blue": .27}
@@ -59,9 +62,14 @@ def model(m, now):
          + ". Vínculos com cadastros recalculados em cada foto.")
     text(21, "Plataforma · Estoque e prazo de captação", "header")
     metric_cards(22, [("Projetos cadastrados", "proj_total", "number"), ("Podem captar hoje", "proj_ativos", "number"),
-                      ("Disponíveis", "st_disponivel", "number"), ("Em execução", "st_em_execucao", "number")])
-    metric_cards(26, [("Rascunhos", "st_rascunho", "number"), ("Dentro do prazo", "exp_vigente", "number"),
-                      ("Prazo vencido", "exp_expirado", "number"), ("Sem prazo definido", "exp_sem_data", "number")])
+                      ("Prazo vencido, a reativar", "proj_a_reativar", "number"), ("Em execução", "st_em_execucao", "number")])
+    # Nota no meio, e nao no fim: ela explica as duas faixas, e a linha 29 tem de
+    # ficar livre para separar a secao do proximo cabecalho, como no resto da aba.
+    text(25, "Rascunhos, podem captar hoje, prazo vencido, concluídos e sem prazo definido somam o estoque; "
+         "\"Em execução\" é um recorte dentro de quem pode captar. Projeto com prazo vencido não aparece para o "
+         "incentivador na plataforma: volta a captar com renovação de prazo, e é a fila da régua de reengajamento.")
+    metric_cards(26, [("Rascunhos", "st_rascunho", "number"), ("Concluídos", "st_concluido", "number"),
+                      ("Sem prazo definido", "proj_sem_prazo", "number")])
     text(30, "Novos proponentes · Funil de pessoas", "header")
     metric_cards(31, [("Cadastros novos", "funil_cadastraram", "number"), ("Criaram projeto", "funil_com_projeto", "number"),
                       ("Com projeto publicado", "funil_publicaram", "number"), ("Aptos a captar hoje", "funil_aptos", "number")])
