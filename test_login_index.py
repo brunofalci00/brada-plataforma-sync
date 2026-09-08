@@ -201,14 +201,46 @@ class _ExigeFuso(dt.datetime):
 
     @classmethod
     def today(cls):
-        raise AssertionError("date/datetime.today() le a hora local do processo")
+        raise AssertionError("datetime.today() le a hora local do processo")
+
+
+class _DataExigeFuso(dt.date):
+    """`date` que recusa `today()`.
+
+    Precisa existir separado de `_ExigeFuso`: o defeito original era
+    `dt.date.today()`, e bloquear so o `datetime.today()` deixava a versao
+    errada passar verde. `fromisoformat` continua funcionando (a subclasse
+    herda), que e o unico outro uso de `dt.date` dentro de `filtros`.
+    """
+
+    @classmethod
+    def today(cls):
+        raise AssertionError("date.today() le a hora local do processo")
 
 
 def _sem_relogio_local(monkeypatch):
     """Troca o `dt` de `filtros` por um que so aceita conversao com fuso."""
     falso = types.SimpleNamespace(
-        datetime=_ExigeFuso, date=dt.date, timedelta=dt.timedelta, timezone=dt.timezone)
+        datetime=_ExigeFuso, date=_DataExigeFuso,
+        timedelta=dt.timedelta, timezone=dt.timezone)
     monkeypatch.setattr(filtros, "dt", falso)
+
+
+def test_o_guarda_de_fuso_bloqueia_os_dois_relogios_locais(monkeypatch):
+    """Meta-teste: sem isto o guarda apodrece calado.
+
+    `_sem_relogio_local` so vale enquanto barrar as DUAS portas de saida para o
+    relogio do processo. Ja passou verde com uma delas aberta.
+    """
+    _sem_relogio_local(monkeypatch)
+    for chamada in (lambda: filtros.dt.date.today(),
+                    lambda: filtros.dt.datetime.today(),
+                    lambda: filtros.dt.datetime.fromtimestamp(0)):
+        with pytest.raises(AssertionError):
+            chamada()
+    # o que e legitimo continua funcionando
+    assert filtros.dt.date.fromisoformat("2026-09-08") == dt.date(2026, 9, 8)
+    assert filtros.dt.datetime.fromtimestamp(0, UTC).year == 1970
 
 
 def test_conversao_do_login_declara_o_fuso(monkeypatch):
