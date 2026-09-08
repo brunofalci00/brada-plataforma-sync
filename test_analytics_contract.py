@@ -170,3 +170,36 @@ def test_vencimento_conta_so_quem_pode_captar():
               _projeto("Disponível", "expirado", "2026-08-01")]
     m = sync.compute_dashboard_metrics([], linhas, [], datetime.datetime(2026, 9, 8, tzinfo=sync.BRT))
     assert m["vence_30d"] == 1
+
+
+def test_status_sem_acento_nao_zera_cartao_nem_quebra_a_soma():
+    """A aba afirma que os cinco grupos somam o estoque; acento nao pode decidir isso.
+
+    Antes, `st.get("Concluído")` lia o campo cru enquanto apto/a_reativar/sem_prazo
+    liam por `normal()`. Um "Concluido" sem acento zerava o cartao E furava a soma,
+    com os outros tres continuando certos.
+    """
+    linhas = [_projeto("Concluido", "vigente"),   # sem acento, de proposito
+              _projeto("CONCLUÍDO", "vigente"),   # caixa alta
+              _projeto("Disponível", "vigente")]
+    m = sync.compute_dashboard_metrics([], linhas, [], datetime.datetime(2026, 9, 8, tzinfo=sync.BRT))
+    assert m["st_concluido"] == 2
+    assert m["proj_fora_dos_grupos"] == 0
+    assert (m["st_rascunho"] + m["st_concluido"] + m["proj_ativos"]
+            + m["proj_a_reativar"] + m["proj_sem_prazo"]) == m["proj_total"]
+
+
+def test_status_previsto_que_nao_cabe_em_nenhum_grupo_e_contado_e_nao_ignorado():
+    """`Aprovado` esta em KNOWN_PROJECT_STATUS, entao o detector de drift NAO avisa.
+
+    Sem esta conta, ligar esse status no Firestore faria a soma da aba parar de fechar
+    sem nada reclamar em lugar nenhum.
+    """
+    linhas = [_projeto("Disponível", "vigente"),
+              _projeto("Aprovado", "vigente"),
+              _projeto("Em Elaboração", "sem_data")]
+    assert {"Aprovado", "Em Elaboração"} <= sync.KNOWN_PROJECT_STATUS
+    m = sync.compute_dashboard_metrics([], linhas, [], datetime.datetime(2026, 9, 8, tzinfo=sync.BRT))
+    assert m["proj_fora_dos_grupos"] == 2
+    assert (m["st_rascunho"] + m["st_concluido"] + m["proj_ativos"] + m["proj_a_reativar"]
+            + m["proj_sem_prazo"] + m["proj_fora_dos_grupos"]) == m["proj_total"]
