@@ -133,6 +133,31 @@ def test_indice_aceita_o_mapa_uid_doc_que_o_outreach_ja_tem(monkeypatch):
     assert idx["u1"] == int(doc.timestamp() * 1000)
 
 
+def test_a_porta_que_as_reguas_usam_passa_pelo_merge(monkeypatch):
+    """`filtros.indice_login` e por onde a vitrine e a sem_projeto entram.
+
+    Os testes acima chamam `sync.load_login_index`, que e a camada de baixo.
+    Sem este, trocar o corpo de `indice_login` de volta por
+    `load_auth_login_index()` devolve o defeito exatamente as duas reguas que
+    mandam e-mail — e a suite inteira continua verde (conferido por mutacao).
+    """
+    auth = int(dt.datetime(2026, 8, 28, 12, 0, tzinfo=UTC).timestamp() * 1000)
+    doc = dt.datetime(2026, 9, 8, 12, 50, tzinfo=UTC)
+    _fake_auth(monkeypatch, {"u1": auth})
+    lido = []
+
+    def _colecao(db, nome):
+        lido.append((db, nome))
+        return _users([("u1", {"lastLogin": doc})])
+
+    monkeypatch.setattr(sync, "load_collection", _colecao)
+
+    idx = filtros.indice_login("db-sentinela")
+
+    assert idx["u1"] == int(doc.timestamp() * 1000)   # o doc venceu o Auth
+    assert lido == [("db-sentinela", "users")]        # o db chegou no Firestore
+
+
 # --------------------------------------------------------------------------- #
 # 2. Fuso
 # --------------------------------------------------------------------------- #
@@ -181,6 +206,44 @@ def test_corte_de_inatividade_nao_muda_de_lado_por_causa_do_fuso():
     dias = filtros.dias_desde_login("u1", _idx(u1=ms), hoje)
     assert dias == 30 and dias >= corte              # BRT: sumida
     assert (hoje - acesso_utc.date()).days == 29     # UTC: ativa, outro veredito
+
+
+class _NaiveNaoConverte(dt.datetime):
+    """`datetime` que recusa converter enquanto estiver sem fuso.
+
+    Ler naive como hora LOCAL e invisivel por RESULTADO num processo que ja
+    roda em UTC: as duas leituras coincidem la. Ou seja, as assercoes de valor
+    deste arquivo nao reprovariam no GitHub Actions, que e o unico lugar onde
+    isto roda sozinho — conferido por mutacao, `ts_ms_naive_local` e
+    `dedup_naive_como_local` sobrevivem com TZ=UTC. Esta classe testa a
+    CHAMADA, como `_ExigeFuso` ja faz do outro lado: quem carimba UTC antes
+    converte, quem chama direto no naive estoura (e as duas funcoes, que
+    engolem excecao, devolvem None em vez do valor).
+    """
+
+    def timestamp(self):
+        if self.tzinfo is None:
+            raise AssertionError("timestamp() sem fuso le a hora local do processo")
+        return dt.datetime.timestamp(self)
+
+    def astimezone(self, tz=None):
+        if self.tzinfo is None:
+            raise AssertionError("astimezone() sem fuso assume a hora local do processo")
+        return dt.datetime.astimezone(self, tz)
+
+
+def test_ts_ms_normaliza_o_naive_antes_de_converter():
+    """O naive vira UTC ANTES da conversao, nao no relogio da maquina."""
+    esperado = int(dt.datetime(2026, 9, 8, 2, 30, tzinfo=UTC).timestamp() * 1000)
+
+    assert sync._ts_ms(_NaiveNaoConverte(2026, 9, 8, 2, 30)) == esperado
+
+
+def test_dedup_normaliza_o_naive_antes_de_converter():
+    """Mesma regra no `enviadoEm` do dedup de 14 dias."""
+    naive = _NaiveNaoConverte(2026, 9, 9, 1, 0)   # 08/09 22:00 em BRT
+
+    assert filtros._dias_desde(naive, dt.date(2026, 9, 9)) == 1
 
 
 class _ExigeFuso(dt.datetime):
