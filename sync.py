@@ -782,6 +782,42 @@ def build_leads_automatize(leads_raw, users_rows, issues):
     return rows
 
 
+# Nomes dos grupos do cartao de estoque. Sao tambem os segmentos da metrica
+# `projects_por_estoque` no snap_diario e as chaves devolvidas por
+# `grupos_de_estoque` — um vocabulario so para as duas superficies.
+GRUPOS_ESTOQUE = ("apto", "a_reativar", "sem_prazo", "rascunho", "concluido", "fora_dos_grupos")
+
+
+def grupos_de_estoque(project_records):
+    """Parte o estoque de projetos nos grupos do cartao: sem sobra, sem repeticao.
+
+    Uma implementacao so, lida por `compute_dashboard_metrics` (os cartoes de hoje)
+    e por `build_snapshot` (a serie historica). Enquanto as duas superficies
+    chamarem daqui, elas nao tem como divergir — que e o defeito que derrubou o
+    cartao "Disponiveis" em 08/09/2026.
+
+    `apto`/`a_reativar`/`sem_prazo` vem do contrato e cobrem Disponivel + Em
+    Execucao partido pelo prazo. Rascunho e concluido fecham o estoque, contados
+    por `normal()` como os outros tres: contar um por texto cru e os outros
+    normalizados foi exatamente o que fez a acentuacao virar parte da regra.
+
+    `fora_dos_grupos` e o resto por subtracao, e existe porque KNOWN_PROJECT_STATUS
+    ja preve status ("Aprovado", "Em Elaboração", "Finalizado") que nao caem em
+    balde nenhum — e o detector de drift nao acusaria, porque sao conhecidos.
+    Com ele gravado, a soma da serie continua fechando em vez de mentir calada.
+    """
+    st = Counter(analytics.normal(r.get("status")) for r in project_records)
+    grupos = {
+        "apto": sum(1 for r in project_records if analytics.apto(r)),
+        "a_reativar": sum(1 for r in project_records if analytics.a_reativar(r)),
+        "sem_prazo": sum(1 for r in project_records if analytics.sem_prazo(r)),
+        "rascunho": st.get("rascunho", 0),
+        "concluido": st.get("concluido", 0),
+    }
+    grupos["fora_dos_grupos"] = len(project_records) - sum(grupos.values())
+    return {nome: grupos[nome] for nome in GRUPOS_ESTOQUE}
+
+
 def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=None):
     """Formato longo: enum novo vira so um segmento novo (zero quebra de
     schema no Looker). Firestore nao tem historico — cada dia sem snapshot
@@ -810,6 +846,37 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
     add("disponivel_por_completude", "completo", _n_disp - _n_selo)
     for sit, n in sorted(Counter(r[p["expiracao_situacao"]] for r in projects_rows).items()):
         add("projects_por_expiracao", sit, n)
+
+    # Os cartoes de 08/09/2026 ganham serie propria. O nome segue as vizinhas
+    # (`projects_por_status`, `projects_por_expiracao`, `disponivel_por_completude`):
+    # entidade + "_por_" + o corte. O corte aqui e o ESTOQUE, isto e, o cruzamento
+    # status x prazo — que nenhuma das duas de cima consegue dar, porque cada uma
+    # projeta um eixo so. `projects_por_expiracao` em particular conta sobre TODOS
+    # os projetos, rascunho incluso: era ela a unica serie de expiracao existente, e
+    # e justamente o universo que a decisao de 08/09 desautorizou.
+    #
+    # Metrica unica com seis segmentos, e nao seis metricas: formato longo e o
+    # contrato desta aba (grupo novo vira linha nova, o Looker nao ganha coluna).
+    # Rascunho e concluido entram aqui de novo, mesmo ja aparecendo em
+    # `projects_por_status`, porque la o segmento e o texto CRU do Firestore — um
+    # "Concluido" sem acento vira outro segmento e a serie do grupo zera sem avisar.
+    # Nestes seis a leitura passa toda por `normal()`, entao a soma fecha sempre.
+    # Sem "(todos)": o total ja e `projects_total`, e um sexto segmento total faria
+    # quem somasse os segmentos contar tudo duas vezes.
+    #
+    # SEM RETROATIVIDADE. A serie comeca no primeiro snap que rodar com este codigo.
+    # Nao da pra estimar o passado com honestidade: `raw_projects` guarda o estado de
+    # HOJE, e as tres colunas de observacao (`inicio_observacao`,
+    # `primeira_publicacao_observada`, `primeira_aptidao_observada`) so marcam a
+    # PRIMEIRA vez que o sync viu a condicao, nunca as trocas depois dela. O unico
+    # backfill aritmeticamente possivel seria "em D, `data_expiracao_cac` < D",
+    # e ele erra em dois lugares de uma vez: assume que o status de hoje valia em D
+    # (projeto que era rascunho em D entraria como se ja captasse) e le uma data que
+    # a renovacao de prazo REESCREVE — ou seja, some exatamente com o projeto que a
+    # regua de reengajamento reativou, que e o unico que a pergunta "como os vencidos
+    # evoluiram no mes" quer ver. Decisao registrada, nao implementada.
+    for grupo, n in grupos_de_estoque(analytics.records(HEADER_PROJECTS, projects_rows)).items():
+        add("projects_por_estoque", grupo, n)
     add("projects_total", "(todos)", len(projects_rows))
 
     for status, n in sorted(Counter(r[q["status"]] or "(vazio)" for r in proposals_rows).items()):
@@ -884,6 +951,10 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     # entre dois jeitos de ler o mesmo campo, na mesma funcao.
     st = Counter(analytics.normal(r[p["status"]]) for r in projects_rows)
     n_selo = sum(1 for r in projects_rows if r[p["dados_em_atualizacao"]] == "sim")
+    # Os cinco grupos do cartao de estoque vem do helper, e nao de contas locais:
+    # o `snap_diario` grava os MESMOS numeros chamando a mesma funcao, entao o cartao
+    # de hoje e a serie historica dele nao tem como discordar.
+    #
     # Regua de "ativo" VALIDADA pela Tamyris em 08/09/2026: status Disponivel ou
     # Em Execucao E prazo de captacao vigente.
     #
@@ -891,12 +962,13 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     # 377 contra 360, e os 17 de diferenca eram 30 vencidos a menos 13 ja em
     # execucao. Numero que nao correspondia a experiencia de ninguem — nem a do
     # incentivador (o Matchmaking esconde vencido) nem a do reporting.
-    ativos = sum(1 for r in project_records if analytics.apto(r))
+    grupos = grupos_de_estoque(project_records)
+    ativos = grupos["apto"]
     # Mesmo universo de `ativos`, partido pelo prazo. Os tres cobrem Disponivel +
     # Em Execucao sem sobra nem repeticao, entao rascunho, concluido e estes tres
     # somam exatamente o estoque — e a tela pode afirmar isso.
-    a_reativar = sum(1 for r in project_records if analytics.a_reativar(r))
-    sem_prazo = sum(1 for r in project_records if analytics.sem_prazo(r))
+    a_reativar = grupos["a_reativar"]
+    sem_prazo = grupos["sem_prazo"]
 
     # A aba AFIRMA, por escrito, que os cinco grupos somam o estoque. Hoje e verdade porque
     # os quatro status que existem caem todos em um balde — mas KNOWN_PROJECT_STATUS ja
@@ -905,8 +977,7 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     #
     # Sem esta conta, a frase da tela vira mentira em silencio no dia em que o Thiago ligar
     # um deles. Avisa e nao quebra, como o resto dos detectores desta casa.
-    fora_dos_grupos = (len(projects_rows) - st.get("rascunho", 0) - st.get("concluido", 0)
-                       - ativos - a_reativar - sem_prazo)
+    fora_dos_grupos = grupos["fora_dos_grupos"]
     if fora_dos_grupos:
         print("[SCHEMA WARNING] " + str(fora_dos_grupos) + " projeto(s) fora dos cinco grupos "
               "do cartao de estoque: a soma da aba parou de fechar. Status presentes: "
@@ -970,8 +1041,8 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "st_disponivel_selo": n_selo,
         "st_disponivel_completo": st.get("disponivel", 0) - n_selo,
         "st_em_execucao": st.get("em execucao", 0),
-        "st_rascunho": st.get("rascunho", 0),
-        "st_concluido": st.get("concluido", 0),
+        "st_rascunho": grupos["rascunho"],
+        "st_concluido": grupos["concluido"],
         "proj_fora_dos_grupos": fora_dos_grupos,
         "proj_a_reativar": a_reativar,
         "proj_sem_prazo": sem_prazo,
