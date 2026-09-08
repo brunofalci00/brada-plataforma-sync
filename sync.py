@@ -318,6 +318,47 @@ def ms_to_date(ms):
         return ""
 
 
+def _ts_ms(v):
+    """Timestamp do Firestore, datetime ou ISO -> milissegundos EPOCH.
+
+    Epoch nao tem fuso, mas a LEITURA tem: datetime sem tzinfo e lido como UTC
+    de proposito. O Firestore devolve `DatetimeWithNanoseconds` sempre
+    tz-aware em UTC; num naive, `.timestamp()` assumiria a hora LOCAL da
+    maquina, e o mesmo instante viraria epoch diferente aqui (BRT) e no runner
+    do GitHub Actions (UTC) — ate um dia de diferenca depois de virar data.
+    Mesma convencao de `to_date`.
+    """
+    if v is None or v == "":
+        return None
+    try:
+        if isinstance(v, datetime.datetime):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=datetime.timezone.utc)
+            return int(v.timestamp() * 1000)
+        if hasattr(v, "timestamp"):  # Timestamp de outra lib, ja com fuso
+            return int(v.timestamp() * 1000)
+        s = str(v).strip()
+        # Epoch em ms ja pronto, defensivo igual `to_date`. Sem este ramo um
+        # `lastLogin` gravado como numero (o front e JS, e `Date.now()` devolve
+        # numero) vira None, e a pessoa reaparece como "nunca acessou" — que e
+        # exatamente o defeito que este indice existe para evitar.
+        if re.match(r"^\d{12,13}$", s):
+            return int(s)
+        # Offset explicito PRESERVADO. `str(v)[:19]` cortava o "-03:00" e
+        # carimbava UTC no que sobrava, errando o instante em tres horas; perto
+        # da meia-noite isso vira um dia inteiro na data do acesso. `to_date`,
+        # que este docstring diz espelhar, sempre respeitou o offset.
+        try:
+            d = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            d = datetime.datetime.fromisoformat(s[:19])
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=datetime.timezone.utc)
+        return int(d.timestamp() * 1000)
+    except Exception:
+        return None
+
+
 def norm_utm(v):
     """trim + lower. Producao ja tem utm_campaign com espaco no fim."""
     if not v:
@@ -394,8 +435,14 @@ def sim_nao(b):
 # ===================================================
 
 def load_auth_login_index():
-    """uid -> last_sign_in_ms via Firebase Auth (proxy de login ate o campo
-    lastLogin existir no Firestore — briefing_thiago_lastlogin)."""
+    """uid -> last_sign_in_ms via Firebase Auth. METADE do sinal de acesso.
+
+    `last_sign_in_timestamp` so se move quando a pessoa faz LOGIN de novo. Quem
+    fica logada e volta com a sessao viva nunca o atualiza, e o Auth congela na
+    ultima autenticacao. Nao use esta funcao sozinha para decidir "sumiu":
+    `load_login_index` cruza isto com o `lastLogin` do doc de `users`, que a
+    plataforma passou a gravar (o campo que este docstring dizia nao existir).
+    """
     from firebase_admin import auth as fb_auth
 
     init_firebase_auth()
@@ -404,6 +451,43 @@ def load_auth_login_index():
         md = u.user_metadata
         out[u.uid] = md.last_sign_in_timestamp  # ms ou None
     return out
+
+
+def load_login_index(db=None, users_raw=None):
+    """uid -> ultimo acesso em ms epoch, o MAIS RECENTE entre as duas fontes.
+
+    Fonte unica de "quando a pessoa acessou" para a planilha e para as reguas.
+
+    Por que duas fontes: o Auth so registra LOGIN, entao quem volta com a
+    sessao viva congela nele; o `lastLogin` do doc de `users` acompanha o
+    acesso, mas so existe para quem entrou depois de o campo passar a ser
+    gravado. Nenhuma das duas cobre todo mundo, e nenhuma e mais nova sempre —
+    por isso o maximo, e nao uma com fallback na outra.
+
+    Medido em 08/09/2026: 53 pessoas com o doc pelo menos um dia mais novo que
+    o Auth (mediana 16 dias, maximo 72) e 21 que o Auth dava como paradas ha
+    30+ dias tendo acessado dentro da janela. Elas receberiam "voce sumiu".
+
+    Ausencia nas duas continua sendo None ("nunca acessou"), que as reguas
+    tratam como sumido — comportamento preservado de proposito.
+
+    Os dois lados viram epoch em ms antes de comparar: o Auth ja vem assim, e o
+    doc vem como `DatetimeWithNanoseconds` em UTC. Comparar datetime com int,
+    ou converter um dos dois com a hora local, erra por ate um dia.
+    """
+    if users_raw is None:
+        if db is None:
+            raise ValueError("load_login_index exige `db` ou `users_raw`")
+        users_raw = load_collection(db, "users")
+    if isinstance(users_raw, dict):
+        users_raw = users_raw.items()
+
+    idx = load_auth_login_index()
+    for uid, doc in users_raw:
+        ms = _ts_ms((doc or {}).get("lastLogin"))
+        if ms and ms > (idx.get(uid) or 0):
+            idx[uid] = ms
+    return idx
 
 
 def load_collection(db, name):
@@ -507,6 +591,9 @@ def build_projects(projects_raw, users_by_id, today_str, issues):
 
 
 def build_users(users_raw, login_index, projects_by_owner, issues):
+    """`login_index` e o indice UNIFICADO de `load_login_index`, nao o do Auth
+    puro: `data_ultimo_login`, `logou_alguma_vez` e `ativo_30d` subcontavam
+    acesso enquanto liam so o Auth."""
     rows = []
     now = datetime.datetime.now(BRT)
     cutoff_30d = now - datetime.timedelta(days=30)
@@ -1066,18 +1153,6 @@ CONTROLES_POR_PESSOA = ("regua_rascunho_envios", "regua_vitrine_envios",
 CONTROLE_POR_PROJETO = "regua_expiracao_envios"
 
 
-def _ts_ms(v):
-    """Timestamp do Firestore, datetime ou ISO -> milissegundos. None se nao der."""
-    if v is None:
-        return None
-    try:
-        if hasattr(v, "timestamp"):
-            return int(v.timestamp() * 1000)
-        return int(datetime.datetime.fromisoformat(str(v)[:19]).timestamp() * 1000)
-    except Exception:
-        return None
-
-
 def mapa_primeiro_envio(db, dono_de_projeto):
     """
     uid -> timestamp (ms) do PRIMEIRO e-mail que a gente mandou pra pessoa.
@@ -1387,8 +1462,10 @@ def main():
     print(f"firestore: proposals={len(proposals_raw)}")
     grants_raw = load_collection(db, "grants")
     print(f"firestore: grants={len(grants_raw)}")
-    login_index = load_auth_login_index()
-    print(f"auth: users={len(login_index)}")
+    # Indice unificado (Auth + `lastLogin` do doc). Reusa `users_raw` em vez de
+    # reler a colecao: a leitura de `users` ja aconteceu tres linhas acima.
+    login_index = load_login_index(users_raw=users_raw)
+    print(f"acesso: uids com sinal de login={sum(1 for v in login_index.values() if v)}")
 
     # Planilha da plataforma ANTIGA (KPI comparativo de migracao)
     import fonte_antiga

@@ -8,7 +8,7 @@ Padrao espelha `brada-hubspot-sync` e `brada-clickup-sync`. Documentacao complet
 
 | Aba | Modo | Conteudo |
 |---|---|---|
-| `raw_users` | overwrite | 1 linha/usuario (pseudonimizado): cadastro, role, atribuicao UTM, login (proxy via Auth), projetos |
+| `raw_users` | overwrite | 1 linha/usuario (pseudonimizado): cadastro, role, atribuicao UTM, acesso (Auth + `lastLogin`), projetos |
 | `raw_projects` | overwrite | 1 linha/projeto: status, expiracao CAC (vigente/expirado/sem_data), budget, ODS/UF |
 | `raw_proposals` | overwrite | 1 linha/proposta: status, edital, valor aprovado (R$), datas |
 | `snap_diario` | append idempotente | serie historica em formato longo (data, metrica, segmento, valor) |
@@ -49,5 +49,5 @@ Secrets do repo (Settings -> Secrets and variables -> Actions):
 - Firestore: database NOMEADO `ai-studio-93e1b1b8-...` (o `(default)` existe e esta VAZIO).
 - `projects.createdAt` e STRING; `users.createdAt` e Timestamp — `to_date()` cobre os dois.
 - Datas truncadas em America/Sao_Paulo (BRT) antes de virar `AAAA-MM-DD`.
-- Login = proxy via Firebase Auth `lastSignInTimestamp` ate o campo `lastLogin` existir no Firestore.
+- Acesso = o MAIS RECENTE entre o `lastLogin` do doc em `users` e o `lastSignInTimestamp` do Firebase Auth (`sync.load_login_index`). O Auth sozinho so registra LOGIN, entao quem volta com a sessao viva congela nele: em 08/09/2026 isso dava 21 pessoas como paradas ha 30+ dias tendo acessado dentro da janela, e o `ativo_30d` da planilha marcava 49 em vez de 70.
 - `snap_diario` e a UNICA fonte de serie historica (Firestore so tem estado atual): rodar manual 1x/dia ate o cron subir.

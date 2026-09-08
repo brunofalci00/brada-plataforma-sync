@@ -366,7 +366,9 @@ def main():
     users_by_id = {uid: d for uid, d in sync.load_collection(db, "users")}
     projects_raw = sync.load_collection(db, "projects")
     try:
-        login_idx = sync.load_auth_login_index()
+        # Indice unificado (Auth + `lastLogin` do doc): `users_by_id` ja esta
+        # em memoria, entao nao ha releitura da colecao.
+        login_idx = sync.load_login_index(users_raw=users_by_id)
     except Exception as e:  # Auth indisponivel: degrada (todos viram Frio), nao quebra
         login_idx = {}
         print(f"AVISO: login_idx indisponivel ({e}); Logou?/Temperatura degradam pra Frio")
