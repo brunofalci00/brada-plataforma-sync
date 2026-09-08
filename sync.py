@@ -877,7 +877,12 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     funnel = analytics.funil_pessoas(user_records, project_records)
     auto = analytics.funil_pessoas([r for r in user_records if r.get("origem_canal") == "automatize"], project_records)
 
-    st = Counter(r[p["status"]] for r in projects_rows)
+    # Contagem por status NORMALIZADA. Era `Counter(...)` cru com `st.get("Concluído")`,
+    # e a acentuacao virava parte da regra: um "Concluido" sem acento vindo do Firestore
+    # zeraria o cartao E quebraria a soma dos cinco grupos, enquanto `apto`/`a_reativar`/
+    # `sem_prazo` — que passam por `normal()` — continuariam certos. Divergencia silenciosa
+    # entre dois jeitos de ler o mesmo campo, na mesma funcao.
+    st = Counter(analytics.normal(r[p["status"]]) for r in projects_rows)
     n_selo = sum(1 for r in projects_rows if r[p["dados_em_atualizacao"]] == "sim")
     # Regua de "ativo" VALIDADA pela Tamyris em 08/09/2026: status Disponivel ou
     # Em Execucao E prazo de captacao vigente.
@@ -892,6 +897,20 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     # somam exatamente o estoque — e a tela pode afirmar isso.
     a_reativar = sum(1 for r in project_records if analytics.a_reativar(r))
     sem_prazo = sum(1 for r in project_records if analytics.sem_prazo(r))
+
+    # A aba AFIRMA, por escrito, que os cinco grupos somam o estoque. Hoje e verdade porque
+    # os quatro status que existem caem todos em um balde — mas KNOWN_PROJECT_STATUS ja
+    # preve "Aprovado", "Em Elaboração" e "Finalizado", que nao caem em nenhum. E o detector
+    # de drift NAO avisaria: eles sao status conhecidos, so nao previstos aqui.
+    #
+    # Sem esta conta, a frase da tela vira mentira em silencio no dia em que o Thiago ligar
+    # um deles. Avisa e nao quebra, como o resto dos detectores desta casa.
+    fora_dos_grupos = (len(projects_rows) - st.get("rascunho", 0) - st.get("concluido", 0)
+                       - ativos - a_reativar - sem_prazo)
+    if fora_dos_grupos:
+        print("[SCHEMA WARNING] " + str(fora_dos_grupos) + " projeto(s) fora dos cinco grupos "
+              "do cartao de estoque: a soma da aba parou de fechar. Status presentes: "
+              + json.dumps(dict(st), ensure_ascii=False))
 
     # --- Coorte de expiracao: o que vence quando (cumulativo) ---------------
     # Mesmo universo de `ativos`, pra a coorte falar dos mesmos projetos do card
@@ -947,12 +966,13 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "mes_anterior_rotulo": (now_brt.replace(day=1) - datetime.timedelta(days=1)).strftime("%m/%Y completo"),
         "proj_total": len(projects_rows),
         "proj_ativos": ativos,
-        "st_disponivel": st.get("Disponível", 0),
+        "st_disponivel": st.get("disponivel", 0),
         "st_disponivel_selo": n_selo,
-        "st_disponivel_completo": st.get("Disponível", 0) - n_selo,
-        "st_em_execucao": st.get("Em Execução", 0),
-        "st_rascunho": st.get("Rascunho", 0),
-        "st_concluido": st.get("Concluído", 0),
+        "st_disponivel_completo": st.get("disponivel", 0) - n_selo,
+        "st_em_execucao": st.get("em execucao", 0),
+        "st_rascunho": st.get("rascunho", 0),
+        "st_concluido": st.get("concluido", 0),
+        "proj_fora_dos_grupos": fora_dos_grupos,
         "proj_a_reativar": a_reativar,
         "proj_sem_prazo": sem_prazo,
         "vence_30d": vencem_ate(30),
