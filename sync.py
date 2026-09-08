@@ -878,13 +878,20 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
     auto = analytics.funil_pessoas([r for r in user_records if r.get("origem_canal") == "automatize"], project_records)
 
     st = Counter(r[p["status"]] for r in projects_rows)
-    exp = Counter(r[p["expiracao_situacao"]] for r in projects_rows)
     n_selo = sum(1 for r in projects_rows if r[p["dados_em_atualizacao"]] == "sim")
-    # Regua PROPOSTA de "ativo" (a validar com a Tamyris; rotulada na aba):
-    # status Disponivel ou Em Execucao E captacao nao expirada.
-    ativos = sum(1 for r in projects_rows
-                 if r[p["status"]] in ("Disponível", "Em Execução")
-                 and r[p["expiracao_situacao"]] == "vigente")
+    # Regua de "ativo" VALIDADA pela Tamyris em 08/09/2026: status Disponivel ou
+    # Em Execucao E prazo de captacao vigente.
+    #
+    # O que a validacao derrubou junto foi o card "Disponiveis" que ficava ao lado:
+    # 377 contra 360, e os 17 de diferenca eram 30 vencidos a menos 13 ja em
+    # execucao. Numero que nao correspondia a experiencia de ninguem — nem a do
+    # incentivador (o Matchmaking esconde vencido) nem a do reporting.
+    ativos = sum(1 for r in project_records if analytics.apto(r))
+    # Mesmo universo de `ativos`, partido pelo prazo. Os tres cobrem Disponivel +
+    # Em Execucao sem sobra nem repeticao, entao rascunho, concluido e estes tres
+    # somam exatamente o estoque — e a tela pode afirmar isso.
+    a_reativar = sum(1 for r in project_records if analytics.a_reativar(r))
+    sem_prazo = sum(1 for r in project_records if analytics.sem_prazo(r))
 
     # --- Coorte de expiracao: o que vence quando (cumulativo) ---------------
     # Mesmo universo de `ativos`, pra a coorte falar dos mesmos projetos do card
@@ -894,10 +901,9 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
 
     def vencem_ate(dias):
         limite = (now_brt.date() + datetime.timedelta(days=dias)).isoformat()
-        return sum(1 for r in projects_rows
-                   if r[p["status"]] in ("Disponível", "Em Execução")
-                   and r[p["expiracao_situacao"]] == "vigente"
-                   and hoje_iso <= r[p["data_expiracao_cac"]] <= limite)
+        return sum(1 for r in project_records
+                   if analytics.apto(r)
+                   and hoje_iso <= r["data_expiracao_cac"] <= limite)
 
     # --- Funil do proponente ------------------------------------------------
     # So ONG: investidor e admin nao fazem parte deste funil.
@@ -947,9 +953,8 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "st_em_execucao": st.get("Em Execução", 0),
         "st_rascunho": st.get("Rascunho", 0),
         "st_concluido": st.get("Concluído", 0),
-        "exp_vigente": exp.get("vigente", 0),
-        "exp_expirado": exp.get("expirado", 0),
-        "exp_sem_data": exp.get("sem_data", 0),
+        "proj_a_reativar": a_reativar,
+        "proj_sem_prazo": sem_prazo,
         "vence_30d": vencem_ate(30),
         "vence_60d": vencem_ate(60),
         "vence_90d": vencem_ate(90),

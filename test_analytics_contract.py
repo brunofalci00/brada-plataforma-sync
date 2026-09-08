@@ -102,3 +102,71 @@ def test_layout_request_rectangles_and_visible_rows():
             area = v['range']
             assert len(v['rows']) == area['endRowIndex'] - area['startRowIndex']
             assert all(len(row['values']) == area['endColumnIndex'] - area['startColumnIndex'] for row in v['rows'])
+
+
+def _projeto(status, situacao, expira=""):
+    """Linha de raw_projects com so o que as reguas de estoque leem."""
+    linha = dict.fromkeys(sync.HEADER_PROJECTS, "")
+    linha.update(project_hash=status + situacao, status=status,
+                 expiracao_situacao=situacao, data_expiracao_cac=expira)
+    return [linha[c] for c in sync.HEADER_PROJECTS]
+
+
+def test_prazo_vencido_e_fila_de_reativacao_e_nao_estoque_disponivel():
+    """Os 30 vencidos da medicao de 08/09 estavam escondidos dentro de "Disponiveis".
+
+    O card antigo somava 377 = 347 aptos + 30 vencidos, um numero que nao batia
+    nem com o que o incentivador ve (o Matchmaking filtra vencido) nem com o
+    reporting. Aqui a separacao e afirmada nos dois sentidos.
+    """
+    vencido = {"status": "Disponível", "expiracao_situacao": "expirado"}
+    assert a.a_reativar(vencido)
+    assert not a.apto(vencido)
+    assert not a.sem_prazo(vencido)
+
+    apto = {"status": "Em Execução", "expiracao_situacao": "vigente"}
+    assert a.apto(apto) and not a.a_reativar(apto)
+
+    # Rascunho vencido era 327 dos 357 do card "Prazo vencido": publicar vem
+    # antes de captar, entao ele nao e fila de reativacao de ninguem.
+    assert not a.a_reativar({"status": "Rascunho", "expiracao_situacao": "expirado"})
+    # Concluido ja terminou: nao volta para a vitrine por renovacao de prazo.
+    assert not a.a_reativar({"status": "Concluído", "expiracao_situacao": "expirado"})
+
+
+def test_valor_novo_de_expiracao_aparece_em_sem_prazo_em_vez_de_sumir():
+    assert a.sem_prazo({"status": "Disponível", "expiracao_situacao": "sem_data"})
+    assert a.sem_prazo({"status": "Disponível", "expiracao_situacao": "em_analise"})
+    assert not a.sem_prazo({"status": "Rascunho", "expiracao_situacao": "sem_data"})
+
+
+def test_cartoes_de_estoque_somam_o_total_sem_repetir_projeto():
+    linhas = ([_projeto("Disponível", "vigente")] * 347
+              + [_projeto("Disponível", "expirado")] * 30
+              + [_projeto("Em Execução", "vigente")] * 13
+              + [_projeto("Concluído", "vigente")]
+              + [_projeto("Rascunho", "expirado")] * 327
+              + [_projeto("Rascunho", "sem_data")] * 10
+              + [_projeto("Rascunho", "vigente")] * 9)
+    m = sync.compute_dashboard_metrics([], linhas, [], datetime.datetime(2026, 9, 8, tzinfo=sync.BRT))
+
+    assert m["proj_total"] == 737
+    assert m["proj_ativos"] == 360
+    assert m["proj_a_reativar"] == 30
+    assert m["proj_sem_prazo"] == 0
+    assert m["st_rascunho"] == 346
+    assert m["st_concluido"] == 1
+    # A afirmacao que o texto da aba faz: os cinco grupos cobrem o estoque, cada
+    # projeto em exatamente um. Sem isso, mudar um cartao quebra a soma em silencio.
+    assert (m["st_rascunho"] + m["st_concluido"] + m["proj_ativos"]
+            + m["proj_a_reativar"] + m["proj_sem_prazo"]) == m["proj_total"]
+    # "Em execucao" e recorte, e nao grupo: cabe inteiro dentro de quem pode captar.
+    assert m["st_em_execucao"] <= m["proj_ativos"]
+
+
+def test_vencimento_conta_so_quem_pode_captar():
+    linhas = [_projeto("Disponível", "vigente", "2026-09-20"),
+              _projeto("Rascunho", "vigente", "2026-09-20"),
+              _projeto("Disponível", "expirado", "2026-08-01")]
+    m = sync.compute_dashboard_metrics([], linhas, [], datetime.datetime(2026, 9, 8, tzinfo=sync.BRT))
+    assert m["vence_30d"] == 1

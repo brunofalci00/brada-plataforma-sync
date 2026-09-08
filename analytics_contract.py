@@ -16,6 +16,9 @@ def valor_aprovado(proposals):
         return ''
     return round(sum(float(p['valor_aprovado']) for p in approved), 2)
 PUBLICADOS = {"disponivel", "em execucao", "concluido"}
+# Os dois status em que um projeto pode receber dinheiro. Concluido esta fora: ele
+# ja publicou e ja terminou, entao nao e nem apto nem fila de reengajamento.
+CAPTANDO = {"disponivel", "em execucao"}
 
 
 def normal(value):
@@ -28,8 +31,34 @@ def publicado(project):
 
 
 def apto(project):
-    return (normal(project.get("status")) in {"disponivel", "em execucao"}
+    return (normal(project.get("status")) in CAPTANDO
             and normal(project.get("expiracao_situacao")) == "vigente")
+
+
+def a_reativar(project):
+    """Publicado para captar, mas com o prazo final de captacao vencido.
+
+    Nao e "quase apto": a tela de descoberta do incentivador ja esconde prazo
+    vencido (`Matchmaking.tsx`, plataforma v3), entao o projeto nao aparece para
+    ninguem e so volta a captar com renovacao de prazo. E a fila de trabalho da
+    regua de reengajamento, e era o unico numero acionavel dentro do antigo card
+    "Disponiveis" — que somava estes aos aptos e nao correspondia nem ao que o
+    incentivador ve nem ao reporting (Tamyris, 08/09/2026).
+    """
+    return (normal(project.get("status")) in CAPTANDO
+            and normal(project.get("expiracao_situacao")) == "expirado")
+
+
+def sem_prazo(project):
+    """Publicado para captar e sem data de prazo utilizavel.
+
+    Vigia, nao metrica: um projeto assim nao e apto (o `apto` exige vigente) nem
+    entra na fila de reativacao, entao sumiria da tela se ninguem o contasse. A
+    condicao e por exclusao, e nao `== "sem_data"`, para que um quarto valor de
+    `expiracao_situacao` apareca aqui em vez de evaporar.
+    """
+    return (normal(project.get("status")) in CAPTANDO
+            and normal(project.get("expiracao_situacao")) not in ("vigente", "expirado"))
 
 
 def proposta_teste(proposal):
