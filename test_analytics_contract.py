@@ -203,3 +203,123 @@ def test_status_previsto_que_nao_cabe_em_nenhum_grupo_e_contado_e_nao_ignorado()
     assert m["proj_fora_dos_grupos"] == 2
     assert (m["st_rascunho"] + m["st_concluido"] + m["proj_ativos"] + m["proj_a_reativar"]
             + m["proj_sem_prazo"] + m["proj_fora_dos_grupos"]) == m["proj_total"]
+
+
+def _segmentos(snap, metrica):
+    """Mapa segmento -> valor de uma metrica dentro do snap de um dia."""
+    return {r[2]: r[3] for r in snap if r[1] == metrica}
+
+
+def test_snap_grava_os_grupos_de_estoque_com_os_mesmos_numeros_dos_cartoes():
+    """A trava contra as duas superficies divergirem.
+
+    O cartao de hoje sai de `compute_dashboard_metrics` e a serie historica sai de
+    `build_snapshot`. Se cada uma contar por conta propria, um dia a serie do
+    "prazo vencido" diz uma coisa e o cartao ao lado dela diz outra — que e o
+    mesmo defeito que derrubou o card "Disponiveis" em 08/09/2026.
+    """
+    linhas = ([_projeto("Disponível", "vigente")] * 5
+              + [_projeto("Em Execução", "vigente")] * 2
+              + [_projeto("Disponível", "expirado")] * 3
+              + [_projeto("Em Execução", "sem_data")]
+              + [_projeto("Rascunho", "expirado")] * 4
+              + [_projeto("Concluído", "vigente")] * 2
+              # Sobra proposital: o grupo do resto precisa ser comparado com valor,
+              # e nao zero contra zero. "Aprovado" e status conhecido sem balde;
+              # status vazio e o tipo de linha que um filtro futuro descartaria em
+              # uma das duas superficies e nao na outra, e a trava tem que ver isso.
+              + [_projeto("Aprovado", "vigente"), _projeto("", "vigente")])
+    snap = sync.build_snapshot([], linhas, [], "2026-09-08")
+    grupos = _segmentos(snap, "projects_por_estoque")
+    m = sync.compute_dashboard_metrics([], linhas, [], datetime.datetime(2026, 9, 8, tzinfo=sync.BRT))
+
+    assert grupos["apto"] == m["proj_ativos"] == 7
+    assert grupos["a_reativar"] == m["proj_a_reativar"] == 3
+    assert grupos["sem_prazo"] == m["proj_sem_prazo"] == 1
+    assert grupos["rascunho"] == m["st_rascunho"] == 4
+    assert grupos["concluido"] == m["st_concluido"] == 2
+    assert grupos["fora_dos_grupos"] == m["proj_fora_dos_grupos"] == 2
+    # Particao completa nas duas superficies, sobre as MESMAS linhas.
+    assert sum(grupos.values()) == m["proj_total"] == len(linhas)
+
+
+def test_snap_de_um_dia_reconstroi_o_estoque_sozinho():
+    """Olhando so o snapshot de uma data, os cinco grupos fecham o total.
+
+    E o que permite responder "como isso evoluiu no mes" sem ter que cruzar a
+    serie com o estado de hoje do Firestore, que nao guarda historico nenhum.
+    """
+    linhas = ([_projeto("Disponível", "vigente")] * 5
+              + [_projeto("Disponível", "expirado")] * 3
+              + [_projeto("Rascunho", "")] * 2
+              + [_projeto("Concluído", "vigente")])
+    snap = sync.build_snapshot([], linhas, [], "2026-09-08")
+    grupos = _segmentos(snap, "projects_por_estoque")
+    total = _segmentos(snap, "projects_total")["(todos)"]
+    assert sum(grupos.values()) == total == len(linhas)
+
+
+def test_grupo_vazio_grava_zero_em_vez_de_sumir_da_serie():
+    """Linha ausente e "dia sem snapshot" para `serie_semanal`, e nao zero.
+
+    Se um grupo so fosse gravado quando tem projeto, o dia em que a fila de
+    reativacao zerasse viraria buraco no grafico em vez de virar a boa noticia.
+    """
+    grupos = _segmentos(sync.build_snapshot([], [], [], "2026-09-08"), "projects_por_estoque")
+    assert set(grupos) == set(sync.GRUPOS_ESTOQUE)
+    assert all(valor == 0 for valor in grupos.values())
+
+
+def test_serie_do_vencido_no_snap_nao_conta_rascunho():
+    """O gap que a metrica nova fecha.
+
+    A unica serie de expiracao que existia conta sobre TODOS os projetos, rascunho
+    incluso — justamente o universo que a decisao de 08/09/2026 desautorizou. Aqui
+    11 projetos tem prazo vencido no campo e so 2 sao fila de reativacao.
+    """
+    linhas = [_projeto("Disponível", "expirado")] * 2 + [_projeto("Rascunho", "expirado")] * 9
+    coluna = sync.HEADER_PROJECTS.index("expiracao_situacao")
+    assert sum(1 for r in linhas if r[coluna] == "expirado") == 11
+
+    grupos = _segmentos(sync.build_snapshot([], linhas, [], "2026-09-08"), "projects_por_estoque")
+    assert grupos["a_reativar"] == 2
+    assert grupos["rascunho"] == 9
+
+
+def test_soma_do_snap_nao_depende_de_acento_nem_de_caixa():
+    """Rascunho e concluido sao regravados aqui, e nao lidos de `projects_por_status`.
+
+    La o segmento e o texto CRU do Firestore: um "Concluido" sem acento vira outro
+    segmento, a serie do grupo zera e a soma fura, tudo em silencio. Nestes seis a
+    leitura passa toda por `normal()`.
+    """
+    linhas = [_projeto("Concluido", "vigente"), _projeto("CONCLUÍDO", "vigente"),
+              _projeto("rascunho", "sem_data"), _projeto("Disponível", "vigente")]
+    grupos = _segmentos(sync.build_snapshot([], linhas, [], "2026-09-08"), "projects_por_estoque")
+    assert grupos["concluido"] == 2
+    assert grupos["rascunho"] == 1
+    assert grupos["apto"] == 1
+    assert grupos["fora_dos_grupos"] == 0
+
+
+def test_status_fora_dos_grupos_aparece_no_snap_em_vez_de_furar_a_soma():
+    """`Aprovado` e status conhecido, entao o detector de drift nao acusaria."""
+    linhas = [_projeto("Disponível", "vigente"), _projeto("Aprovado", "vigente")]
+    grupos = _segmentos(sync.build_snapshot([], linhas, [], "2026-09-08"), "projects_por_estoque")
+    assert grupos["fora_dos_grupos"] == 1
+    assert sum(grupos.values()) == len(linhas)
+
+
+def test_serie_semanal_le_a_metrica_nova_sem_mudanca():
+    now = datetime.datetime(2026, 9, 8, tzinfo=sync.BRT)
+    segunda = now.date() - datetime.timedelta(days=now.weekday())
+    snap = sync.build_snapshot([], [_projeto("Disponível", "expirado")] * 3, [],
+                               now.date().isoformat())
+
+    serie = sync.serie_semanal(snap, "projects_por_estoque", now, "a_reativar")
+    assert serie[-1] == (segunda.strftime("%d/%m"), 3)
+    assert serie[0][1] == ""  # semana sem snapshot continua indisponivel, nao zero
+
+    # A metrica nao tem "(todos)": o total do estoque e `projects_total`, gravado a
+    # parte. Pedir a serie sem segmento devolve vazio em vez de somar grupos.
+    assert sync.serie_semanal(snap, "projects_por_estoque", now)[-1][1] == ""
