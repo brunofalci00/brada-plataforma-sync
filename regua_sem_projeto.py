@@ -46,7 +46,7 @@ from regua_expiracao import (
 )
 from regua_rascunho import carregar_token_leadlovers, esta_suprimido
 from filtros import (
-    motivo_exclusao, indice_login, dias_desde_login, uids_tocados,
+    motivo_exclusao, indice_login, dias_desde_login, uids_tocados, hoje_brt,
     exigir_checagem_supressao, registrar_supressao, motivo_ja_resolvido,
 )
 
@@ -220,14 +220,14 @@ def main():
     args = ap.parse_args()
     exigir_checagem_supressao(args)
 
-    hoje = dt.date.fromisoformat(args.hoje) if args.hoje else dt.date.today()
+    hoje = dt.date.fromisoformat(args.hoje) if args.hoje else hoje_brt()
     pausa = PAUSA_ENTRE_ENVIOS_S if args.pausa is None else args.pausa
     modo = "APPLY (ENVIA)" if args.apply else "DRY-RUN (nao envia)"
     print(f"=== REGUA DOS SEM PROJETO — {modo} ===")
     print(f"  data de referencia: {hoje}")
 
     db = conectar()
-    idx_login = indice_login()
+    idx_login = indice_login(db)
     candidatos, dono_de_projeto = coletar(db, hoje, idx_login)
     print(f"  candidatos: {len(candidatos)}")
     for v in ("nao_migrado", "sem_projeto"):

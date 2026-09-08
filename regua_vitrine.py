@@ -42,6 +42,7 @@ from regua_expiracao import (
 from regua_rascunho import campos_faltando, carregar_token_leadlovers, esta_suprimido
 from filtros import (
     e_texto_de_teste, motivo_exclusao, indice_login, dias_desde_login, uids_tocados,
+    hoje_brt,
     exigir_checagem_supressao, registrar_supressao, motivo_ja_resolvido,
 )
 
@@ -234,15 +235,16 @@ def main():
     args = ap.parse_args()
     exigir_checagem_supressao(args)
 
-    hoje = dt.date.fromisoformat(args.hoje) if args.hoje else dt.date.today()
+    hoje = dt.date.fromisoformat(args.hoje) if args.hoje else hoje_brt()
     pausa = PAUSA_ENTRE_ENVIOS_S if args.pausa is None else args.pausa
     modo = "APPLY (ENVIA)" if args.apply else "DRY-RUN (nao envia)"
     print(f"=== REGUA DA VITRINE — {modo} ===")
     print(f"  data de referencia: {hoje}  |  inativo = {DIAS_INATIVO}+ dias sem acessar")
 
     db = conectar()
-    idx_login = indice_login()
-    print(f"  usuarios com login no Auth: {sum(1 for v in idx_login.values() if v)}")
+    idx_login = indice_login(db)
+    print(f"  usuarios com acesso conhecido (doc + Auth): "
+          f"{sum(1 for v in idx_login.values() if v)}")
 
     por_dono, dono_de_projeto = coletar(db, hoje, idx_login)
     print(f"  donos com projeto vigente e sem acesso: {len(por_dono)}")
