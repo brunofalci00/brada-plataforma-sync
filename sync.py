@@ -1384,7 +1384,13 @@ PII_PATTERNS_DIGITOS = [
 ]
 COLUNAS_ISENTAS_DIGITOS = {"user_hash", "project_hash", "owner_hash",
                            "proposal_hash", "user_hash_match", "legacy_hash",
-                           "utm_term", "lead_id"}  # utm_term/lead_id: id controlado, nao-PII
+                           "utm_term", "lead_id",
+                           # Sprint 3 (sync_aprovai.py): identificadores ja hasheados.
+                           "payment_id_hash", "customer_id_hash",
+                           # Sprint 3 (sync_sdr_incentivador.py): deal_id do HubSpot tem 11
+                           # digitos, e id de registro de CRM (empresa/negocio), nao PII de
+                           # pessoa fisica — isencao ja prevista neste comentario antes de existir.
+                           "deal_id", "owner_id"}  # utm_term/lead_id: id controlado, nao-PII
 
 
 def pii_scan(header, rows):

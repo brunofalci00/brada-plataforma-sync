@@ -23,7 +23,7 @@ jobs:
         run: pip install -r requirements.txt pytest
 
       - name: Validar contrato de analytics
-        run: pytest -q test_analytics_contract.py test_sheets_retry.py
+        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_sync_sdr_incentivador.py
 
       - name: Sync Plataforma -> Sheets
         env:
@@ -31,5 +31,27 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           AUTOMATIZE_ENDPOINT_TOKEN: ${{ secrets.AUTOMATIZE_ENDPOINT_TOKEN }}
-          # Sprint 2 (funil Automatize): HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
         run: python sync.py
+
+      # Mesma Sheet (aba AprovAI + raw_asaas_aprovai + raw_funil_aprovai), fonte
+      # separada (Asaas + Firestore do projeto aprovai-de156, app do Thiago).
+      # Passo independente: uma falha aqui nao derruba o sync.py principal (ja rodou).
+      - name: Sync AprovAI -> Sheets
+        if: always()
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          ASAAS_APROVAI_API_KEY: ${{ secrets.ASAAS_APROVAI_API_KEY }}
+          ASAAS_APROVAI_ENVIRONMENT: production
+          APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: python sync_aprovai.py
+
+      # Sprint 2 destravado: aba SDR Incentivador + raw_hubspot_incentivador,
+      # cards do pipeline Incentivador por trabalhado_por (Automatize x Executivo).
+      - name: Sync SDR Incentivador -> Sheets
+        if: always()
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+        run: python sync_sdr_incentivador.py
