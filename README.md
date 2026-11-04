@@ -16,6 +16,27 @@ Padrao espelha `brada-hubspot-sync` e `brada-clickup-sync`. Documentacao complet
 
 Sprint 2 adiciona `raw_funil_automatize` (HubSpot `trabalhado_por=Automatize`) + motor de atribuicao 3 camadas.
 
+## Sprint 3 — AprovAI e SDR Incentivador (scripts separados, mesma Sheet)
+
+| Script | Aba(s) | Fonte | Cron |
+|---|---|---|---|
+| `sync_aprovai.py` | `AprovAI`, `raw_asaas_aprovai`, `raw_funil_aprovai` | Asaas (cobrancas filtradas por `is_aprovai_transaction`, porta exata da regra do app `iasmartsites/aprovai2`) + Firestore do projeto `aprovai-de156` (`analytics_funnel_events`) | Junto do `sync.py`, mesmo workflow |
+| `sync_sdr_incentivador.py` | `SDR Incentivador`, `raw_hubspot_incentivador` | HubSpot, pipeline Incentivador (`default`): cards por `trabalhado_por`, quem chega em `[EV] Reuniao Agendada` ou alem e por qual caminho (automatico vs manual) | Junto do `sync.py`, mesmo workflow |
+
+PII do Asaas (nome/e-mail/CPF do cliente) e usada SO em memoria pra classificar
+teste-ou-staff; nunca vira coluna. Identificador publicado e `sync.hash_id`
+(sha256[:12]), mesma convencao do resto do repo. `dealname`/`deal_id` do HubSpot
+nao entram nessa regra (registro de negocio B2B, nao pessoa fisica).
+
+Rodar local:
+```
+python sync_aprovai.py --dry-run
+python sync_sdr_incentivador.py --dry-run
+```
+Secrets adicionais: `ASAAS_APROVAI_API_KEY` (local: `~/.brada-secrets/asaas-aprovai.env`),
+`APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON` (local: `~/.brada-secrets/aprovai-sa.json`),
+`HUBSPOT_TOKEN` (local: `~/.brada-secrets/hubspot.env`, mesmo token do `brada-hubspot-sync`).
+
 ## PII (inegociavel)
 
 - Serializacao whitelist; `email/name/phone/document/uid` NUNCA saem pra Sheet nem pra log.
