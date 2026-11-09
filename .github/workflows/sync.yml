@@ -23,7 +23,7 @@ jobs:
         run: pip install -r requirements.txt pytest
 
       - name: Validar contrato de analytics
-        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_sync_sdr_incentivador.py
+        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_sync_sdr_incentivador.py test_sync_primeira_fila.py
 
       - name: Sync Plataforma -> Sheets
         env:
@@ -55,3 +55,14 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
         run: python sync_sdr_incentivador.py
+
+      # Aba Primeira Fila: banco da Automatize, usuario so leitura (esquema dados).
+      - name: Sync Primeira Fila -> Sheets
+        if: always()
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          PF_DB_HOST: ${{ secrets.PF_DB_HOST }}
+          PF_DB_USER: ${{ secrets.PF_DB_USER }}
+          PF_DB_PASSWORD: ${{ secrets.PF_DB_PASSWORD }}
+        run: python sync_primeira_fila.py
