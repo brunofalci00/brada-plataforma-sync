@@ -4,3 +4,4 @@ google-cloud-firestore>=2.16.0
 firebase-admin>=6.5.0
 requests>=2.31.0
 google-api-python-client>=2.100.0
+psycopg2-binary>=2.9.9
