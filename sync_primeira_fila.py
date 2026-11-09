@@ -23,35 +23,71 @@ PCT = {"type": "PERCENT", "pattern": "0.0%"}
 
 HEADER_DIARIO = ["dia", "cliques_anuncios", "reservas_criadas", "perfis_criados", "leads_hunter_captados"]
 
+# Perfis de teste e da equipe (Automatize, Brada, contas da plataforma), confirmados
+# pelo Bruno em 09/11. Saem do painel junto com os espacos, reservas, cliques e conversas
+# ligados a eles. Trocar por um campo no banco quando a Automatize criar.
+PERFIS_TESTE = [
+    "78434337-1c2b-4e75-a372-b523d9158b02",
+    "3253aaad-f4a4-4113-9eac-23761586fb02",
+    "3d086ae1-a362-4fad-8e41-726c9188c80b",
+    "750902c6-fd8c-4621-ac65-8d37cee95fc6",
+    "39aefb58-44f1-4c41-95e4-ef0e71b3552b",
+    "b1948061-dfaf-4a46-9e33-78e18280d74a",
+    "be837816-3b3f-4397-ac81-720bb25ef156",
+    "bb56adda-030b-47a8-98d4-03da5936420d",
+    "a0322f67-213d-4527-ac67-8805aae243c0",
+    "cfcc07b5-a05d-43e1-9b0c-cffbd2a88919",
+    "6d936fac-3bb4-47dd-a485-c1367a8486c4",
+    "c01d2718-3124-4aac-9f8e-3cdcb74527be",
+    "1eb9c0d9-7467-45b7-968f-02b192433b21",
+]
+
+URL_EQUIPE = "https://www.primeira-fila.com/equipe"
+
+# CTEs reutilizadas: o que e real = fora da lista de teste.
+BASE = """
+    with teste as (select unnest(%(teste)s::uuid[]) id),
+    espacos_reais as (select * from dados.espacos where owner_id not in (select id from teste)),
+    perfis_reais as (select * from dados.perfis where id not in (select id from teste)),
+    reservas_reais as (
+        select r.* from dados.reservas r join espacos_reais e on e.id = r.venue_id
+        where r.guest_id is null or r.guest_id not in (select id from teste)),
+    cliques_reais as (
+        select c.* from dados.cliques_anuncios c join espacos_reais e on e.protocol = c.venue_protocol),
+    conversas_reais as (
+        select c.* from dados.chat_conversas c join espacos_reais e on e.id = c.venue_id
+        where c.guest_id is null or c.guest_id not in (select id from teste))
+"""
+
 # Cada consulta devolve UMA linha com os numeros do bloco. Ordem das colunas = chaves.
 CONSULTAS = {
     "espacos": ("""
         select count(*),
                count(*) filter (where revisao_status = 'publicado' and not coalesce(pausado, false)
                                 and not coalesce(revisao_oculto, false)),
-               count(*) filter (where coalesce(pausado, false)),
                count(*) filter (where revisao_status is distinct from 'publicado')
-        from dados.espacos""",
-        ["cadastrados", "no_ar", "pausados", "em_revisao"]),
+        from espacos_reais""",
+        ["cadastrados", "no_ar", "em_revisao"]),
     "anfitrioes": ("""
         select count(*),
                count(*) filter (where plano = 'rede'),
                count(*) filter (where plano = 'basico'),
-               (select count(*) from dados.contas_recebimento where status = 'ativa')
-        from dados.perfis""",
+               (select count(*) from dados.contas_recebimento where status = 'ativa'
+                and owner_id not in (select id from teste))
+        from perfis_reais""",
         ["perfis", "plano_rede", "plano_basico", "contas_recebimento"]),
     "procura": ("""
-        select (select count(*) from dados.cliques_anuncios),
-               (select count(*) from dados.cliques_anuncios where clicked_at >= now() - interval '30 days'),
-               (select count(*) from dados.chat_conversas),
-               (select count(*) from dados.reservas)""",
+        select (select count(*) from cliques_reais),
+               (select count(*) from cliques_reais where clicked_at >= now() - interval '30 days'),
+               (select count(*) from conversas_reais),
+               (select count(*) from reservas_reais)""",
         ["cliques_total", "cliques_30d", "conversas", "pedidos_reserva"]),
     "reservas": ("""
         select count(*) filter (where pagamento_status = 'pago' and status <> 'cancelada'),
                coalesce(sum(valor_total) filter (where pagamento_status = 'pago' and status <> 'cancelada'), 0),
                coalesce(sum(comissao) filter (where pagamento_status = 'pago' and status <> 'cancelada'), 0),
                count(*) filter (where status in ('cancelada', 'expirada'))
-        from dados.reservas""",
+        from reservas_reais""",
         ["pagas", "valor_pago", "comissao", "canceladas_expiradas"]),
     "hunter": ("""
         select count(*),
@@ -62,11 +98,11 @@ CONSULTAS = {
         ["captados", "abordados", "responderam", "cadastraram"]),
 }
 
-CONSULTA_DIARIO = """
-    with dias as (
-        select clicked_at::date d, 'c' k from dados.cliques_anuncios
-        union all select created_at::date, 'r' from dados.reservas
-        union all select created_at::date, 'p' from dados.perfis
+CONSULTA_DIARIO = BASE + """
+    , dias as (
+        select clicked_at::date d, 'c' k from cliques_reais
+        union all select created_at::date, 'r' from reservas_reais
+        union all select created_at::date, 'p' from perfis_reais
         union all select created_at::date, 'h' from dados.hunter_leads)
     select d, count(*) filter (where k = 'c'), count(*) filter (where k = 'r'),
            count(*) filter (where k = 'p'), count(*) filter (where k = 'h')
@@ -113,9 +149,9 @@ def coletar(conn):
     cur = conn.cursor()
     dados = {}
     for bloco, (sql, chaves) in CONSULTAS.items():
-        cur.execute(sql)
+        cur.execute(BASE + sql, {"teste": PERFIS_TESTE})
         dados[bloco] = dict(zip(chaves, (_num(v) for v in cur.fetchone())))
-    cur.execute(CONSULTA_DIARIO)
+    cur.execute(CONSULTA_DIARIO, {"teste": PERFIS_TESTE})
     dados["diario"] = [[d.isoformat(), *row] for d, *row in cur.fetchall()]
     return dados
 
@@ -130,15 +166,14 @@ def montar_secoes(dados):
         kpi.Secao("Espacos anunciados", [
             (e["cadastrados"], "Espacos cadastrados", None),
             (e["no_ar"], "No ar hoje (publicados e ativos)", None),
-            (e["pausados"], "Pausados pelo anfitriao", None),
             (e["em_revisao"], "Em revisao ou ajuste", None),
-        ]),
+        ], nota=f"Anuncios em revisao: conferir na area da equipe, {URL_EQUIPE}"),
         kpi.Secao("Anfitrioes", [
             (a["perfis"], "Perfis cadastrados", None),
             (a["plano_rede"], "No plano Rede", None),
             (a["plano_basico"], "No plano Basico", None),
             (a["contas_recebimento"], "Com conta de recebimento ativa", None),
-        ], nota="Perfis incluem contas de teste e da equipe; o banco nao marca quem e teste."),
+        ], nota=f"Sem os {len(PERFIS_TESTE)} perfis de teste e da equipe, nem os espacos, reservas, cliques e conversas ligados a eles."),
         kpi.Secao("Procura dos organizadores", [
             (p["cliques_total"], "Cliques em anuncios (desde o lancamento)", None),
             (p["cliques_30d"], "Cliques nos ultimos 30 dias", None),
