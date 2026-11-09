@@ -171,12 +171,16 @@ def requests(sid, metrics, now, metadata, apply_layout):
     return out
 
 
+# Aba renomeada de "Dashboard" para "Plataforma Brada" no dia 04/11; o nome aqui precisa acompanhar.
+TAB_TITLE = "Plataforma Brada"
+
+
 def publish(sh, metrics, now):
     import gspread
     try:
-        ws = sh.worksheet("Dashboard")
+        ws = sh.worksheet(TAB_TITLE)
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title="Dashboard", rows=ROWS, cols=26)
+        ws = sh.add_worksheet(title=TAB_TITLE, rows=ROWS, cols=26)
     apply_layout = ws.acell("Z1").value != VERSION
     sh.batch_update({"requests": requests(ws.id, metrics, now, sh.fetch_sheet_metadata() if apply_layout else {}, apply_layout)})
     return VERSION
