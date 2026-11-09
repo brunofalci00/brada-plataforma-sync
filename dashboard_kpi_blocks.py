@@ -73,7 +73,8 @@ def montar_requests(sheet_id, titulo_pagina, subtitulo, secoes):
 
     `secoes`: lista de `Secao`. Retorna `(requests, n_rows)`.
     """
-    requests = [{"updateCells": {"range": {"sheetId": sheet_id},
+    requests = [{"unmergeCells": {"range": {"sheetId": sheet_id}}},
+                {"updateCells": {"range": {"sheetId": sheet_id},
                                   "fields": "userEnteredValue,userEnteredFormat"}}]
     rows = []
     merges = []  # (r0, r1, c0, c1) 0-indexed, relativo ao topo da aba
@@ -144,6 +145,8 @@ def publish(sh, svc, spreadsheet_id, aba, titulo_pagina, subtitulo, secoes):
     """Desenha/atualiza uma aba de KPIs. `svc` = googleapiclient Sheets service
     (precisa de batchUpdate; gspread sozinho nao faz merge+cor numa chamada so)."""
     ws = get_or_create_ws(sh, aba)
-    requests, _ = montar_requests(ws.id, titulo_pagina, subtitulo, secoes)
+    requests, n_rows = montar_requests(ws.id, titulo_pagina, subtitulo, secoes)
+    if n_rows > ws.row_count:
+        ws.resize(rows=n_rows + 5)
     svc.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
     return ws
