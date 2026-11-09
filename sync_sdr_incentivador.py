@@ -22,6 +22,8 @@ import argparse
 import datetime
 import json
 import os
+import time
+import urllib.error
 import urllib.request
 
 import sync
@@ -66,16 +68,30 @@ def hs_headers():
     return {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
 
 
+HS_MAX_TENTATIVAS = 6
+
+
+def hs_request(req):
+    """Abre a requisicao repetindo em 429 (limite de taxa do HubSpot) com espera crescente."""
+    for tentativa in range(HS_MAX_TENTATIVAS):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or tentativa == HS_MAX_TENTATIVAS - 1:
+                raise
+            espera = float(e.headers.get("Retry-After") or 2 ** tentativa)
+            time.sleep(espera)
+
+
 def hs_post(url, payload):
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=hs_headers(), method="POST")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+    return hs_request(req)
 
 
 def hs_get(url):
     req = urllib.request.Request(url, headers=hs_headers())
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+    return hs_request(req)
 
 
 def hs_search_paginado(payload):
