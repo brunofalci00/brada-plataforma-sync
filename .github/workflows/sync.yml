@@ -23,7 +23,7 @@ jobs:
         run: pip install -r requirements.txt pytest
 
       - name: Validar contrato de analytics
-        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_sync_sdr_incentivador.py test_sync_primeira_fila.py test_sync_comunidade.py
+        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_sync_sdr_incentivador.py test_sync_primeira_fila.py test_sync_comunidade.py test_sync_visao_geral.py
 
       - name: Sync Plataforma -> Sheets
         env:
@@ -80,3 +80,11 @@ jobs:
             exit 0
           fi
           python sync_comunidade.py
+
+      # Aba Visao Geral: le as abas acima (nao consulta fonte) e conta a historia em 5 capitulos. Sempre por ultimo.
+      - name: Visao Geral -> Sheets
+        if: always()
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: python sync_visao_geral.py
