@@ -57,7 +57,30 @@ def test_base_vazia_nao_divide_por_zero():
 
 def test_secoes_e_diario_sem_equipe():
     d = _dados()
-    assert [len(s.metricas) for s in sc.montar_secoes(sc.calcular(d, AGORA))] == [4] * 6
+    assert [len(s.metricas) for s in sc.montar_secoes(sc.calcular(d, AGORA))] == [1] + [4] * 6
     linhas = sc.diario(d)
     assert ["2026-11-03", 0, 1, 1] in linhas
     assert not any(l[0] == "2026-11-01" for l in linhas)
+
+
+GA = {
+    "propriedade": "1",
+    "totais": [([], [100.0, 150.0, 400.0])],
+    "novo_recorrente": [(["new"], [80.0]), (["returning"], [25.0]), (["(not set)"], [0.0])],
+    "paginas": [(["Entrar ou Criar Conta | Brada"], [50.0]), (["(not set)"], [9.0]),
+                (["Eventos | Brada"], [30.0]), (["A"], [3.0]), (["B"], [2.0]), (["C"], [1.0])],
+}
+
+
+def test_resumo_ga_retorno_e_top_paginas():
+    r = sc.resumo_ga(GA)
+    assert (r["ativos"], r["recorrentes"], r["taxa_retorno"]) == (100.0, 25.0, 0.25)
+    assert r["top"][:2] == [(50.0, "Entrar ou Criar Conta"), (30.0, "Eventos")]
+    assert len(r["top"]) == sc.TOP_PAGINAS
+
+
+def test_secoes_com_ga_vem_primeiro():
+    m = sc.calcular(_dados(ga=GA), AGORA)
+    secoes = sc.montar_secoes(m)
+    assert secoes[0].titulo.startswith("Visitas") and len(secoes) == 8
+    assert sc.resumo_ga(None) is None
