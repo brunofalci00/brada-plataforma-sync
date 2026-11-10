@@ -20,7 +20,14 @@ from sync_aprovai import build_sheets_service
 
 PROJETO = "brada-comunidade-c1ba5"
 DATABASE = "default"
-ESCOPOS = ["https://www.googleapis.com/auth/cloud-platform"]
+ESCOPOS = ["https://www.googleapis.com/auth/cloud-platform",
+           "https://www.googleapis.com/auth/analytics.readonly"]
+
+# Propriedades do Google Analytics com acesso de Leitor para a conta dashboard-leitura.
+# 544471428 = G-HE11117R0R (ligada ao Firebase, dados desde nov/26). Falta a do G-WKKG4NJ3TV.
+GA_PROPRIEDADES = [p for p in os.environ.get("COMUNIDADE_GA_PROPRIEDADES", "544471428").split(",") if p]
+URL_GA = "https://analyticsdata.googleapis.com/v1beta/properties/{}:runReport"
+TOP_PAGINAS = 4
 URL_AUTH = f"https://identitytoolkit.googleapis.com/v1/projects/{PROJETO}/accounts:batchGet"
 
 PCT = {"type": "PERCENT", "pattern": "0.0%"}
@@ -71,7 +78,39 @@ def coletar():
              "courses", "opportunities", "events", "direct_messages"]
     dados = {n: _docs(db, n) for n in nomes}
     dados["auth"] = _contas_auth(creds)
+    dados["ga"] = _analytics(creds)
     return dados
+
+
+def _relatorio(sessao, propriedade, dimensoes, metricas, limite=10):
+    corpo = {
+        "dateRanges": [{"startDate": "30daysAgo", "endDate": "today"}],
+        "dimensions": [{"name": d} for d in dimensoes],
+        "metrics": [{"name": m} for m in metricas],
+        "limit": limite,
+        "orderBys": [{"metric": {"metricName": metricas[0]}, "desc": True}],
+    }
+    r = sessao.post(URL_GA.format(propriedade), json=corpo, timeout=60)
+    r.raise_for_status()
+    return [([d["value"] for d in row.get("dimensionValues", [])],
+             [float(m["value"]) for m in row["metricValues"]]) for row in r.json().get("rows", [])]
+
+
+def _analytics(creds):
+    """Le so a primeira propriedade que responder. Falha de GA nao derruba a aba."""
+    from google.auth.transport.requests import AuthorizedSession
+    sessao = AuthorizedSession(creds)
+    for prop in GA_PROPRIEDADES:
+        try:
+            return {
+                "propriedade": prop,
+                "totais": _relatorio(sessao, prop, [], ["activeUsers", "sessions", "screenPageViews"]),
+                "novo_recorrente": _relatorio(sessao, prop, ["newVsReturning"], ["activeUsers"]),
+                "paginas": _relatorio(sessao, prop, ["unifiedScreenName"], ["screenPageViews"], 20),
+            }
+        except Exception as erro:  # noqa: BLE001 - registra e segue sem o bloco
+            print(f"::warning::Google Analytics {prop} indisponivel: {erro}")
+    return None
 
 
 # ---------------------------------------------------------------- regras (puras, testadas)
@@ -148,6 +187,22 @@ def calcular(dados, agora_ms):
         "editais_abertos": editais.get("ABERTO", 0),
         "editais_breve": editais.get("BREVE", 0),
         "eventos": len(dados["events"]),
+        "ga": resumo_ga(dados.get("ga")),
+    }
+
+
+def resumo_ga(ga):
+    if not ga:
+        return None
+    totais = ga["totais"][0][1] if ga["totais"] else [0, 0, 0]
+    por_tipo = {dims[0]: vals[0] for dims, vals in ga["novo_recorrente"]}
+    paginas = [(vals[0], dims[0].replace(" | Brada", "").strip()) for dims, vals in ga["paginas"]
+               if dims and dims[0] not in ("", "(not set)")]
+    return {
+        "ativos": totais[0], "sessoes": totais[1], "paginas_vistas": totais[2],
+        "recorrentes": por_tipo.get("returning", 0),
+        "taxa_retorno": _taxa(por_tipo.get("returning", 0), totais[0]),
+        "top": paginas[:TOP_PAGINAS],
     }
 
 
@@ -169,8 +224,28 @@ def diario(dados):
     return [[d, *v] for d, v in sorted(contagem.items())]
 
 
-def montar_secoes(m):
+def _secoes_ga(ga):
+    if not ga:
+        return [kpi.Secao("Visitas (Google Analytics)", [
+            ("-", "Sem leitura do Google Analytics nesta rodada", None)], nota_aviso=True,
+            nota="A conta dashboard-leitura precisa do papel Leitor na propriedade.")]
     return [
+        kpi.Secao("Visitas nos ultimos 30 dias (Google Analytics)", [
+            (ga["ativos"], "Visitantes ativos (com e sem cadastro)", None),
+            (ga["recorrentes"], "Visitantes que voltaram", None),
+            (ga["taxa_retorno"], "Parte dos visitantes que voltou", PCT),
+            (ga["paginas_vistas"], "Paginas vistas", None),
+        ], nota="Fonte: propriedade G-HE11117R0R, com dados desde novembro. "
+                "A propriedade principal (G-WKKG4NJ3TV) ainda nao foi liberada.", nota_aviso=True),
+        kpi.Secao("Paginas mais vistas nos ultimos 30 dias", [
+            (vistas, nome, None) for vistas, nome in ga["top"]
+        ] or [(0, "Sem visitas no periodo", None)],
+           nota="Pelo nome da tela: o app tem um endereco so, entao toda pagina aparece como \"/\"."),
+    ]
+
+
+def montar_secoes(m):
+    return _secoes_ga(m.get("ga")) + [
         kpi.Secao("Membros", [
             (m["membros"], "Membros cadastrados", None),
             (m["cadastros_mes"], "Cadastros neste mes", None),
