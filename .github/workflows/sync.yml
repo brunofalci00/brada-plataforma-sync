@@ -40,6 +40,9 @@ jobs:
       # Mesma Sheet (aba AprovAI + raw_asaas_aprovai + raw_funil_aprovai), fonte
       # separada (Asaas + Firestore do projeto aprovai-de156, app do Thiago).
       # Passo independente: uma falha aqui nao derruba o sync.py principal (ja rodou).
+      # Firestore: conta dashboard-leitura (COMUNIDADE_SA_JSON) desde 11/11 -
+      # ganhou datastore.viewer em aprovai-de156, nao precisa mais da SA dedicada
+      # aprovai-sa.json / APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON.
       - name: Sync AprovAI -> Sheets
         if: always()
         env:
@@ -47,7 +50,7 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           ASAAS_APROVAI_API_KEY: ${{ secrets.ASAAS_APROVAI_API_KEY }}
           ASAAS_APROVAI_ENVIRONMENT: production
-          APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON }}
+          COMUNIDADE_SA_JSON: ${{ secrets.COMUNIDADE_SA_JSON }}
         run: python sync_aprovai.py
 
       # Sprint 2 destravado: aba SDR Incentivador + raw_hubspot_incentivador,

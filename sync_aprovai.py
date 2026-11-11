@@ -29,6 +29,7 @@ from collections import Counter
 
 import sync  # reusa auth Sheets, hash_id, pii_guard, write_overwrite, retry
 import dashboard_kpi_blocks as kpi
+import ga_analytics
 
 # ===================================================
 # CONFIG
@@ -38,9 +39,12 @@ APROVAI_FIREBASE_PROJECT = "aprovai-de156"
 
 ASAAS_API_KEY = os.environ.get("ASAAS_APROVAI_API_KEY", "")
 ASAAS_ENVIRONMENT = os.environ.get("ASAAS_APROVAI_ENVIRONMENT", "production")
-APROVAI_FIREBASE_SA_JSON = os.environ.get("APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON", "")
-APROVAI_FIREBASE_SA_FILE = os.environ.get(
-    "APROVAI_FIREBASE_SERVICE_ACCOUNT_FILE", os.path.expanduser(r"~/.brada-secrets/aprovai-sa.json")
+# Mesma conta dashboard-leitura das abas Comunidade e Plataforma: ganhou
+# datastore.viewer + firebaseauth.viewer em aprovai-de156 tambem (10/11), entao
+# nao precisa mais da service account dedicada aprovai-sa.json (11/11).
+COMUNIDADE_SA_JSON = os.environ.get("COMUNIDADE_SA_JSON", "")
+COMUNIDADE_SA_FILE = os.environ.get(
+    "COMUNIDADE_SA_FILE", os.path.expanduser(r"~/.brada-secrets/comunidade-dashboard-sa.json")
 )
 
 # Local dev: carrega do .env dedicado se as vars nao vieram do ambiente (CI).
@@ -166,19 +170,10 @@ def resumo_asaas(rows):
 # FIRESTORE (projeto aprovai-de156)
 # ===================================================
 
-def _aprovai_firebase_creds_info():
-    if APROVAI_FIREBASE_SA_JSON:
-        return json.loads(APROVAI_FIREBASE_SA_JSON.encode("utf-8").decode("utf-8-sig"))
-    with open(APROVAI_FIREBASE_SA_FILE, encoding="utf-8-sig") as fh:
-        return json.load(fh)
-
-
 def init_aprovai_firestore():
     from google.cloud import firestore
-    from google.oauth2 import service_account
 
-    info = _aprovai_firebase_creds_info()
-    creds = service_account.Credentials.from_service_account_info(info)
+    creds = ga_analytics.credenciais(COMUNIDADE_SA_JSON, COMUNIDADE_SA_FILE, "COMUNIDADE_ACCESS_TOKEN")
     return firestore.Client(project=APROVAI_FIREBASE_PROJECT, credentials=creds)
 
 
@@ -257,8 +252,9 @@ def main():
 
     if not ASAAS_API_KEY:
         raise SystemExit("ASAAS_APROVAI_API_KEY (ou ASAAS_API_KEY local) nao configurada.")
-    if not APROVAI_FIREBASE_SA_JSON and not os.path.exists(APROVAI_FIREBASE_SA_FILE):
-        raise SystemExit("Credenciais do Firestore do AprovAI nao encontradas.")
+    if (not COMUNIDADE_SA_JSON and not os.path.exists(COMUNIDADE_SA_FILE)
+            and not os.environ.get("COMUNIDADE_ACCESS_TOKEN")):
+        raise SystemExit("Credenciais do Firestore do AprovAI (dashboard-leitura) nao encontradas.")
 
     now = datetime.datetime.now(sync.BRT)
     now_iso = now.isoformat(timespec="seconds")

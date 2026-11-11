@@ -34,7 +34,9 @@ python sync_aprovai.py --dry-run
 python sync_sdr_incentivador.py --dry-run
 ```
 Secrets adicionais: `ASAAS_APROVAI_API_KEY` (local: `~/.brada-secrets/asaas-aprovai.env`),
-`APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON` (local: `~/.brada-secrets/aprovai-sa.json`),
+`COMUNIDADE_SA_JSON` (local: `~/.brada-secrets/comunidade-dashboard-sa.json` - conta dashboard-leitura,
+reusada pelo Firestore do AprovAI e pelo Google Analytics; a antiga SA dedicada `aprovai-sa.json` nao
+e mais usada desde 11/11),
 `HUBSPOT_TOKEN` (local: `~/.brada-secrets/hubspot.env`, mesmo token do `brada-hubspot-sync`).
 
 ## PII (inegociavel)
