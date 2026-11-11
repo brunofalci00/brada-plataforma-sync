@@ -32,6 +32,7 @@ import time
 from collections import Counter
 from urllib.parse import urlparse
 import analytics_contract as analytics
+import ga_analytics
 
 # gspread/google-auth/firestore importados lazy pra --help rodar sem deps.
 
@@ -87,6 +88,18 @@ FIREBASE_SA_JSON = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
 FIREBASE_SA_FILE = os.environ.get(
     "FIREBASE_SERVICE_ACCOUNT_FILE", os.path.expanduser(r"~/.brada-secrets/firebase-sa.json")
 )
+
+# Google Analytics da Plataforma (match.brada.social, propriedade 537748462).
+# Mesma credencial que le o GA da Comunidade: a conta dashboard-leitura
+# (brada-comunidade-c1ba5.iam.gserviceaccount.com) recebeu Leitor tambem
+# nesta propriedade em 11/11 (ver handoff_dashboard_ecossistema_11nov).
+COMUNIDADE_SA_JSON = os.environ.get("COMUNIDADE_SA_JSON", "")
+COMUNIDADE_SA_FILE = os.environ.get(
+    "COMUNIDADE_SA_FILE", os.path.expanduser(r"~/.brada-secrets/comunidade-dashboard-sa.json")
+)
+PLATAFORMA_GA_PROPRIEDADES = [
+    p for p in os.environ.get("PLATAFORMA_GA_PROPRIEDADES", "537748462").split(",") if p
+]
 
 # Fuso de Brasilia: toda truncagem Timestamp -> data usa BRT, senao cadastro
 # de 22h vira o dia seguinte (UTC).
@@ -1508,6 +1521,23 @@ def read_existing(sh, name, required=()):
         raise ValueError(f"Contrato de cabeçalho alterado: {name}; nada escrito")
     return values[0], values[1:]
 
+
+def coletar_ga_plataforma():
+    """GA da Plataforma (match.brada.social, propriedade 537748462). Falha ou
+    credencial ausente nao derruba o resto do sync: devolve None, e a aba
+    mostra o aviso padrao (ver dashboard_analytics._secao_ga)."""
+    try:
+        creds = ga_analytics.credenciais(COMUNIDADE_SA_JSON, COMUNIDADE_SA_FILE, "COMUNIDADE_ACCESS_TOKEN")
+    except SystemExit as erro:
+        print(f"::warning::Google Analytics da Plataforma sem credencial: {erro}")
+        return None
+    # pagePath, nao unifiedScreenName (como na Comunidade): a plataforma tem
+    # rotas reais por URL. Se a primeira rodada mostrar tudo caindo em "/",
+    # trocar para unifiedScreenName como na Comunidade.
+    ga = ga_analytics.coletar(creds, PLATAFORMA_GA_PROPRIEDADES, dimensao_pagina="pagePath")
+    return ga_analytics.resumo(ga)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Sync Plataforma Brada -> Sheets")
     ap.add_argument("--dry-run", action="store_true",
@@ -1652,6 +1682,7 @@ def main():
     # que devolve o historico completo.
     snap_historico = [r for r in old_snap_rows if r and r[0] != today_str] + snap_rows
     metrics["semanas_ativos"] = serie_semanal(snap_historico, "users_ativos_30d", now_brt)
+    metrics["ga"] = coletar_ga_plataforma()
 
     if args.dry_run:
         if args.output_dir:

@@ -11,24 +11,23 @@ Credencial:
 import argparse
 import collections
 import datetime
-import json
 import os
 
 import sync
 import dashboard_kpi_blocks as kpi
+import ga_analytics
 from sync_aprovai import build_sheets_service
 
 PROJETO = "brada-comunidade-c1ba5"
 DATABASE = "default"
-ESCOPOS = ["https://www.googleapis.com/auth/cloud-platform",
-           "https://www.googleapis.com/auth/analytics.readonly"]
+ESCOPOS = ga_analytics.ESCOPOS
 
 # Propriedades do Google Analytics com acesso de Leitor para a conta dashboard-leitura.
 # 544471428 = G-HE11117R0R (ligada ao Firebase, dados desde nov/26). Falta a do G-WKKG4NJ3TV.
 GA_PROPRIEDADES = [p for p in os.environ.get("COMUNIDADE_GA_PROPRIEDADES", "544471428").split(",") if p]
-URL_GA = "https://analyticsdata.googleapis.com/v1beta/properties/{}:runReport"
-TOP_PAGINAS = 4
 URL_AUTH = f"https://identitytoolkit.googleapis.com/v1/projects/{PROJETO}/accounts:batchGet"
+COMUNIDADE_SA_FILE = os.environ.get(
+    "COMUNIDADE_SA_FILE", os.path.expanduser(r"~/.brada-secrets/comunidade-dashboard-sa.json"))
 
 PCT = {"type": "PERCENT", "pattern": "0.0%"}
 DIA_MS = 86_400_000
@@ -39,16 +38,8 @@ HEADER_DIARIO = ["dia", "cadastros", "primeiras_acoes", "perfis_completos"]
 # ---------------------------------------------------------------- credencial
 
 def _credenciais():
-    sa = os.environ.get("COMUNIDADE_SA_JSON")
-    if sa:
-        from google.oauth2 import service_account
-        info = json.loads(sa.encode("utf-8").decode("utf-8-sig"))
-        return service_account.Credentials.from_service_account_info(info, scopes=ESCOPOS)
-    token = os.environ.get("COMUNIDADE_ACCESS_TOKEN")
-    if token:
-        from google.oauth2.credentials import Credentials
-        return Credentials(token)
-    raise SystemExit("Sem credencial da Comunidade (COMUNIDADE_SA_JSON ou COMUNIDADE_ACCESS_TOKEN).")
+    return ga_analytics.credenciais(os.environ.get("COMUNIDADE_SA_JSON", ""),
+                                     COMUNIDADE_SA_FILE, "COMUNIDADE_ACCESS_TOKEN")
 
 
 def _docs(db, colecao):
@@ -82,35 +73,8 @@ def coletar():
     return dados
 
 
-def _relatorio(sessao, propriedade, dimensoes, metricas, limite=10):
-    corpo = {
-        "dateRanges": [{"startDate": "30daysAgo", "endDate": "today"}],
-        "dimensions": [{"name": d} for d in dimensoes],
-        "metrics": [{"name": m} for m in metricas],
-        "limit": limite,
-        "orderBys": [{"metric": {"metricName": metricas[0]}, "desc": True}],
-    }
-    r = sessao.post(URL_GA.format(propriedade), json=corpo, timeout=60)
-    r.raise_for_status()
-    return [([d["value"] for d in row.get("dimensionValues", [])],
-             [float(m["value"]) for m in row["metricValues"]]) for row in r.json().get("rows", [])]
-
-
 def _analytics(creds):
-    """Le so a primeira propriedade que responder. Falha de GA nao derruba a aba."""
-    from google.auth.transport.requests import AuthorizedSession
-    sessao = AuthorizedSession(creds)
-    for prop in GA_PROPRIEDADES:
-        try:
-            return {
-                "propriedade": prop,
-                "totais": _relatorio(sessao, prop, [], ["activeUsers", "sessions", "screenPageViews"]),
-                "novo_recorrente": _relatorio(sessao, prop, ["newVsReturning"], ["activeUsers"]),
-                "paginas": _relatorio(sessao, prop, ["unifiedScreenName"], ["screenPageViews"], 20),
-            }
-        except Exception as erro:  # noqa: BLE001 - registra e segue sem o bloco
-            print(f"::warning::Google Analytics {prop} indisponivel: {erro}")
-    return None
+    return ga_analytics.coletar(creds, GA_PROPRIEDADES, dimensao_pagina="unifiedScreenName")
 
 
 # ---------------------------------------------------------------- regras (puras, testadas)
@@ -192,18 +156,7 @@ def calcular(dados, agora_ms):
 
 
 def resumo_ga(ga):
-    if not ga:
-        return None
-    totais = ga["totais"][0][1] if ga["totais"] else [0, 0, 0]
-    por_tipo = {dims[0]: vals[0] for dims, vals in ga["novo_recorrente"]}
-    paginas = [(vals[0], dims[0].replace(" | Brada", "").strip()) for dims, vals in ga["paginas"]
-               if dims and dims[0] not in ("", "(not set)")]
-    return {
-        "ativos": totais[0], "sessoes": totais[1], "paginas_vistas": totais[2],
-        "recorrentes": por_tipo.get("returning", 0),
-        "taxa_retorno": _taxa(por_tipo.get("returning", 0), totais[0]),
-        "top": paginas[:TOP_PAGINAS],
-    }
+    return ga_analytics.resumo(ga, limpar_pagina=lambda nome: nome.replace(" | Brada", "").strip())
 
 
 def diario(dados):

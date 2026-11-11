@@ -1,5 +1,6 @@
 import datetime
 
+import ga_analytics
 import sync_comunidade as sc
 
 AGORA = int(datetime.datetime(2026, 11, 10, 12, tzinfo=datetime.timezone.utc).timestamp() * 1000)
@@ -76,7 +77,7 @@ def test_resumo_ga_retorno_e_top_paginas():
     r = sc.resumo_ga(GA)
     assert (r["ativos"], r["recorrentes"], r["taxa_retorno"]) == (100.0, 25.0, 0.25)
     assert r["top"][:2] == [(50.0, "Entrar ou Criar Conta"), (30.0, "Eventos")]
-    assert len(r["top"]) == sc.TOP_PAGINAS
+    assert len(r["top"]) == ga_analytics.TOP_PAGINAS
 
 
 def test_secoes_com_ga_vem_primeiro():

@@ -31,6 +31,10 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           AUTOMATIZE_ENDPOINT_TOKEN: ${{ secrets.AUTOMATIZE_ENDPOINT_TOKEN }}
+          # Mesma conta dashboard-leitura da aba Comunidade: le o GA da Plataforma
+          # (537748462, match.brada.social). Ausente = secao de GA da aba Plataforma
+          # Brada sai com aviso, sem derrubar o resto do sync.
+          COMUNIDADE_SA_JSON: ${{ secrets.COMUNIDADE_SA_JSON }}
         run: python sync.py
 
       # Mesma Sheet (aba AprovAI + raw_asaas_aprovai + raw_funil_aprovai), fonte

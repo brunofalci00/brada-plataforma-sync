@@ -13,6 +13,7 @@ GRADES = {
         ("Plataforma - Estoque e prazo de captacao", [771, 389, 47, 18]),
         ("Novos proponentes - Funil de pessoas", [153, 60, 56, 56]),
         ("Cadastros e uso - Publicos", [6, 44, 165, 69]),
+        ("Visitas (Google Analytics) - match.brada.social", [250, 60, 0.24, 500]),
     ]),
     "Comunidade": _grade("Comunidade Brada", [
         ("Visitas nos ultimos 30 dias (Google Analytics)", [403, 73, 0.181, 1588]),
@@ -38,6 +39,7 @@ GRADES = {
 def test_extrai_por_secao_e_posicao():
     k = vg.extrair(GRADES)
     assert (k["aptos_hoje"], k["prazo_vencido"], k["acessos_plat_30d"]) == (389, 47, 69)
+    assert (k["visitantes_plat_30d"], k["retorno_plat"]) == (250, 0.24)
     assert (k["visitantes_com"], k["retorno_com"], k["membros_com"]) == (403, 0.181, 127)
     assert (k["reunioes_inc"], k["reunioes_automatize"], k["cliques_pf_30d"]) == (150, 1, 718)
     assert all(v is not None for v in k.values())
