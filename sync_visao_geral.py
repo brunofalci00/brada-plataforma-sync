@@ -34,6 +34,12 @@ FONTES = {
     "cad_plat_mes": ("Plataforma Brada", "Cadastros e uso", 0),
     "cad_plat_mes_ant": ("Plataforma Brada", "Cadastros e uso", 1),
     "acessos_plat_30d": ("Plataforma Brada", "Cadastros e uso", 3),
+    # Google Analytics da propriedade 537748462 (match.brada.social), no ar desde
+    # 11/11. "visitantes_plat_30d" ainda nao tem capitulo (os 4 slots de Chegada ja
+    # estao ocupados por publicos distintos) - fica disponivel pra quando o Bruno
+    # quiser trocar algum.
+    "visitantes_plat_30d": ("Plataforma Brada", "Visitas (Google Analytics)", 0),
+    "retorno_plat": ("Plataforma Brada", "Visitas (Google Analytics)", 2),
     "novos_cadastros": ("Plataforma Brada", "Novos proponentes", 0),
     "novos_aptos": ("Plataforma Brada", "Novos proponentes", 3),
     "visitantes_com": ("Comunidade", "Visitas", 0),
@@ -41,6 +47,8 @@ FONTES = {
     "membros_com": ("Comunidade", "Membros", 0),
     "cad_com_mes": ("Comunidade", "Membros", 1),
     "login_com_7d": ("Comunidade", "Uso", 0),
+    # Saiu do capitulo Retorno em 11/11 pra abrir espaco pro "retorno_plat" (GA da
+    # Plataforma); segue disponivel, so nao aparece em nenhum capitulo hoje.
     "acao_com": ("Comunidade", "Uso", 3),
     "pipeline_inc": ("SDR Incentivador", "Volume por canal", 3),
     "reunioes_inc": ("SDR Incentivador", "Quem chega em Reuniao", 0),
@@ -140,7 +148,8 @@ def frases(k):
         (f"Só {_pct(retorno)} dos visitantes da Comunidade voltaram em 30 dias: a maioria entra uma vez "
          f"e não volta." if baixo else
          f"{_pct(retorno)} dos visitantes da Comunidade voltaram em 30 dias.")
-        + f" Na plataforma, {_n(k['acessos_plat_30d'])} pessoas acessaram no mesmo período.", baixo)
+        + f" Na plataforma, {_n(k['acessos_plat_30d'])} pessoas acessaram no mesmo período e "
+          f"{_pct(k['retorno_plat'])} dos visitantes voltaram.", baixo)
 
     cliques, pedidos = k["cliques_pf_30d"], k["pedidos_pf"]
     procura_parada = (cliques or 0) >= CLIQUES_SEM_PEDIDO and not pedidos
@@ -186,7 +195,7 @@ def montar_secoes(k):
         kpi.Secao("3. Retorno: quem volta", [
             ("-" if k["retorno_com"] is None else k["retorno_com"], "Visitantes da Comunidade que voltaram", PCT),
             (_v(k, "login_com_7d"), "Membros que entraram em 7 dias", None),
-            (_v(k, "acao_com"), "Membros com primeira ação relevante", None),
+            ("-" if k["retorno_plat"] is None else k["retorno_plat"], "Visitantes da Plataforma que voltaram", PCT),
             (_v(k, "acessos_plat_30d"), "Pessoas que acessaram a plataforma (30 dias)", None),
         ], nota=f["retorno"][0], nota_aviso=f["retorno"][1]),
         kpi.Secao("4. Conexão: oferta encontra demanda", [
