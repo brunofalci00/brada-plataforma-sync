@@ -22,6 +22,7 @@ Sprint 2 adiciona `raw_funil_automatize` (HubSpot `trabalhado_por=Automatize`) +
 |---|---|---|---|
 | `sync_aprovai.py` | `AprovAI`, `raw_asaas_aprovai`, `raw_funil_aprovai` | Asaas (cobrancas filtradas por `is_aprovai_transaction`, porta exata da regra do app `iasmartsites/aprovai2`) + Firestore do projeto `aprovai-de156` (`analytics_funnel_events`) | Junto do `sync.py`, mesmo workflow |
 | `sync_sdr_incentivador.py` | `SDR Incentivador`, `raw_hubspot_incentivador` | HubSpot, pipeline Incentivador (`default`): cards por `trabalhado_por`, quem chega em `[EV] Reuniao Agendada` ou alem e por qual caminho (automatico vs manual) | Junto do `sync.py`, mesmo workflow |
+| `sync_disparo_incentivador.py` | `Disparo Incentivador`, `raw_disparo_incentivador` | Banco Postgres do SDR Brada (Automatize, so leitura, schema `dados`): funil da Brenda (envio -> abertura -> clique -> resposta -> agenda -> card no HubSpot) + estagio ATUAL de cada card, consultado ao vivo no HubSpot (o estagio salvo no banco da Automatize e so o de quando o card foi criado) | Junto do `sync.py`, mesmo workflow |
 
 PII do Asaas (nome/e-mail/CPF do cliente) e usada SO em memoria pra classificar
 teste-ou-staff; nunca vira coluna. Identificador publicado e `sync.hash_id`
@@ -32,12 +33,15 @@ Rodar local:
 ```
 python sync_aprovai.py --dry-run
 python sync_sdr_incentivador.py --dry-run
+python sync_disparo_incentivador.py --dry-run
 ```
 Secrets adicionais: `ASAAS_APROVAI_API_KEY` (local: `~/.brada-secrets/asaas-aprovai.env`),
 `COMUNIDADE_SA_JSON` (local: `~/.brada-secrets/comunidade-dashboard-sa.json` - conta dashboard-leitura,
 reusada pelo Firestore do AprovAI e pelo Google Analytics; a antiga SA dedicada `aprovai-sa.json` nao
 e mais usada desde 11/11),
-`HUBSPOT_TOKEN` (local: `~/.brada-secrets/hubspot.env`, mesmo token do `brada-hubspot-sync`).
+`HUBSPOT_TOKEN` (local: `~/.brada-secrets/hubspot.env`, mesmo token do `brada-hubspot-sync`),
+`AUTOMATIZE_SDR_DB_HOST/PORT/NAME/USER/PASSWORD` (local: `~/.brada-secrets/automatize-sdr-brada.env`,
+banco so leitura liberado pelo Jean/Automatize em 11/11).
 
 ## PII (inegociavel)
 
