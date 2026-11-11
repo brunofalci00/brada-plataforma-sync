@@ -1403,7 +1403,10 @@ COLUNAS_ISENTAS_DIGITOS = {"user_hash", "project_hash", "owner_hash",
                            # Sprint 3 (sync_sdr_incentivador.py): deal_id do HubSpot tem 11
                            # digitos, e id de registro de CRM (empresa/negocio), nao PII de
                            # pessoa fisica — isencao ja prevista neste comentario antes de existir.
-                           "deal_id", "owner_id"}  # utm_term/lead_id: id controlado, nao-PII
+                           "deal_id", "owner_id",
+                           # 11/11 (sync_disparo_incentivador.py): mesmo sha256[:12] hex dos
+                           # outros *_hash, falso positivo possivel por construcao.
+                           "lead_id_hash"}  # utm_term/lead_id: id controlado, nao-PII
 
 
 def pii_scan(header, rows):
