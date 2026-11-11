@@ -179,14 +179,19 @@ def montar_secoes(leads_por_status, resumo_env, resumo_crd):
             (_taxa(resumo_env["abriram"], resumo_env["total"]), "Abriram", PCT),
             (_taxa(resumo_env["clicaram"], resumo_env["total"]), "Clicaram", PCT),
             (_taxa(resumo_env["responderam"], resumo_env["total"]), "Responderam", PCT),
-        ], nota="Por e-mail e WhatsApp, Brenda (IA de disparo da Automatize)."),
+        ], nota="Por e-mail e WhatsApp, Brenda (IA de disparo da Automatize). Abertura/clique superestimam "
+                "engajamento real: scanner de seguranca de e-mail corporativo abre e clica sozinho "
+                "(achado do diagnostico de 15/10, vault: diagnostico_sdr_incentivador_15out). O card no "
+                "HubSpot nao sofre disso (ver nota da secao seguinte).", nota_aviso=True),
         kpi.Secao("Do clique ate o CRM", [
             (resumo_env["visitaram_agenda"], "Visitaram a pagina da agenda", None),
             (resumo_env["clicaram_agendar"], "Clicaram em agendar", None),
             (resumo_env["card_hubspot"], "Card criado no HubSpot (automatico)", None),
             (_taxa(resumo_env["card_hubspot"], resumo_env["total"]), "Taxa disparo -> card", PCT),
-        ], nota="Card automatico = a integracao cria sozinha quando o lead clica em agendar. "
-                "Sem isso, e o executivo que puxa o lead a mao (nao entra nesta contagem)."),
+        ], nota="Card automatico = a integracao cria sozinha quando o lead clica em agendar. Sem isso, e o "
+                "executivo que puxa o lead a mao (nao entra nesta contagem). Conferido em 11/11: nenhum dos "
+                "cards veio so de abertura rapida (<2min) sem resposta ou clique em agendar - o filtro do "
+                "card ja protege do falso-positivo de scanner."),
         kpi.Secao("Desses cards, onde estao hoje (HubSpot ao vivo)", [
             (resumo_crd["total"], "Cards criados pela automacao (total)", None),
             (resumo_crd["em_reuniao_ou_alem"], "Em reuniao agendada ou alem, agora", None),
