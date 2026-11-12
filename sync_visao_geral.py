@@ -235,8 +235,8 @@ def main():
     subtitulo = (f"Foto: {agora.strftime('%d/%m/%Y %H:%M')} (Brasília) - resumo das abas do dashboard. "
                  "Pergunta central: a Brada atrai, ativa e conecta quem faz e quem financia impacto?")
     svc = build_sheets_service()
-    ws = kpi.publish(sh, svc, sync.SPREADSHEET_ID, ABA, "Visão Geral - Ecossistema Brada",
-                     subtitulo, montar_secoes(k))
+    ws, _ = kpi.publish(sh, svc, sync.SPREADSHEET_ID, ABA, "Visão Geral - Ecossistema Brada",
+                        subtitulo, montar_secoes(k))
     _primeira_aba(svc, ws)
     print(f"Visao Geral: {len(k) - len(faltando)}/{len(k)} KPIs preenchidos.")
 

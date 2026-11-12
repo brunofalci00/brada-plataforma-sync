@@ -143,10 +143,14 @@ def get_or_create_ws(sh, title, rows=30, cols=N_COLS):
 
 def publish(sh, svc, spreadsheet_id, aba, titulo_pagina, subtitulo, secoes):
     """Desenha/atualiza uma aba de KPIs. `svc` = googleapiclient Sheets service
-    (precisa de batchUpdate; gspread sozinho nao faz merge+cor numa chamada so)."""
+    (precisa de batchUpdate; gspread sozinho nao faz merge+cor numa chamada so).
+
+    Retorna `(ws, n_rows)`: `n_rows` e a primeira linha livre depois do
+    conteudo, pra quem quiser ancorar algo (ex.: dashboard_charts.py) sem
+    sobrepor os blocos desenhados aqui."""
     ws = get_or_create_ws(sh, aba)
     requests, n_rows = montar_requests(ws.id, titulo_pagina, subtitulo, secoes)
     if n_rows > ws.row_count:
         ws.resize(rows=n_rows + 5)
     svc.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
-    return ws
+    return ws, n_rows

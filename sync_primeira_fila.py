@@ -13,6 +13,7 @@ import datetime
 import os
 
 import sync
+import dashboard_charts
 import dashboard_kpi_blocks as kpi
 from sync_aprovai import build_sheets_service
 
@@ -223,10 +224,15 @@ def main():
 
     gc = sync.get_sheets_client()
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
-    sync.write_overwrite(sh, "raw_primeira_fila_diario", HEADER_DIARIO, dados["diario"])
-    kpi.publish(sh, build_sheets_service(), sync.SPREADSHEET_ID, "Primeira Fila",
-                "Primeira Fila - Espacos, procura e reservas", subtitulo, secoes)
-    print("Primeira Fila: aba e raw atualizadas.")
+    raw_ws = sync.write_overwrite(sh, "raw_primeira_fila_diario", HEADER_DIARIO, dados["diario"])
+    svc = build_sheets_service()
+    dest_ws, n_rows = kpi.publish(sh, svc, sync.SPREADSHEET_ID, "Primeira Fila",
+                                  "Primeira Fila - Espacos, procura e reservas", subtitulo, secoes)
+    dashboard_charts.publish_line_chart(
+        svc, sync.SPREADSHEET_ID, raw_ws, dest_ws, n_rows=len(dados["diario"]) + 1,
+        series_cols=[1, 2, 3, 4], title="Cliques, reservas, perfis e leads do Hunter por dia",
+        anchor_row=n_rows + 1)
+    print("Primeira Fila: aba, raw e grafico atualizados.")
 
 
 if __name__ == "__main__":
