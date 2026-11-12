@@ -12,6 +12,7 @@ Padrao espelha `brada-hubspot-sync` e `brada-clickup-sync`. Documentacao complet
 | `raw_projects` | overwrite | 1 linha/projeto: status, expiracao CAC (vigente/expirado/sem_data), budget, ODS/UF |
 | `raw_proposals` | overwrite | 1 linha/proposta: status, edital, valor aprovado (R$), datas |
 | `snap_diario` | append idempotente | serie historica em formato longo (data, metrica, segmento, valor) |
+| `raw_tendencia_diaria` | overwrite | pivot de `snap_diario` (aptos a captar, usuarios ativos, leads reais) ja em formato largo, so pra alimentar o grafico de linha nativo da aba Plataforma Brada |
 | `meta_sync` | overwrite | ultima execucao, contagens, avisos de schema drift |
 
 Sprint 2 adiciona `raw_funil_automatize` (HubSpot `trabalhado_por=Automatize`) + motor de atribuicao 3 camadas.
@@ -42,6 +43,20 @@ e mais usada desde 11/11),
 `HUBSPOT_TOKEN` (local: `~/.brada-secrets/hubspot.env`, mesmo token do `brada-hubspot-sync`),
 `AUTOMATIZE_SDR_DB_HOST/PORT/NAME/USER/PASSWORD` (local: `~/.brada-secrets/automatize-sdr-brada.env`,
 banco so leitura liberado pelo Jean/Automatize em 11/11).
+
+## Graficos nativos (`dashboard_charts.py`)
+
+Achado do audit de dados de 11/11: nenhuma aba usava grafico nativo do Sheets, so card de numero.
+`dashboard_charts.publish_line_chart()` desenha um grafico de linha (`addChart`) a partir de uma
+aba `raw_*_diario` ja em formato largo (1a coluna = dia, demais = series numericas), reaproveitado
+por `sync_comunidade.py`, `sync_primeira_fila.py`, `sync_aprovai.py` (funil) e `sync.py` (pivot de
+`snap_diario`). Idempotente: apaga o(s) chart(s) existente(s) na aba de destino antes de redesenhar,
+e redimensiona a aba se faltar linha pra caber a altura inteira do grafico (senao o Sheets clampa e
+sobrepoe conteudo). Valor que volta de `read_existing` (historico) chega como string; quem monta a
+serie precisa converter pra numero de verdade, senao o Sheets descarta a serie inteira do grafico
+sem avisar (`sync.build_tendencia_diaria`/`_numero_ou_vazio` cobre isso pro pivot da Plataforma).
+`SDR Incentivador` e `Disparo Incentivador` ainda nao tem grafico: nenhum dos dois guarda historico
+diario hoje, so foto atual (`write_overwrite`).
 
 ## PII (inegociavel)
 

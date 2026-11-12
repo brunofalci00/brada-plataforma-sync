@@ -28,6 +28,7 @@ import urllib.request
 from collections import Counter
 
 import sync  # reusa auth Sheets, hash_id, pii_guard, write_overwrite, retry
+import dashboard_charts
 import dashboard_kpi_blocks as kpi
 import ga_analytics
 
@@ -336,31 +337,23 @@ def main():
 
     gc = sync.get_sheets_client()
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
-    for nome, (header, rows) in tabs.items():
-        sync.write_overwrite(sh, nome, header, rows)
+    raw_wss = {nome: sync.write_overwrite(sh, nome, header, rows) for nome, (header, rows) in tabs.items()}
 
     svc = build_sheets_service()
-    kpi.publish(sh, svc, sync.SPREADSHEET_ID, "AprovAI", "AprovAI — Funil de conversao e assinantes (Asaas)",
-                subtitulo, secoes)
-    print("AprovAI: aba e raws atualizadas.")
+    dest_ws, n_rows = kpi.publish(sh, svc, sync.SPREADSHEET_ID, "AprovAI",
+                                  "AprovAI — Funil de conversao e assinantes (Asaas)", subtitulo, secoes)
+    dashboard_charts.publish_line_chart(
+        svc, sync.SPREADSHEET_ID, raw_wss["raw_funil_aprovai"], dest_ws, n_rows=len(funil_rows) + 1,
+        series_cols=[1, 2, 3], title="Visualizacoes, cliques e leads do funil por dia",
+        anchor_row=n_rows + 1)
+    print("AprovAI: aba, raws e grafico atualizados.")
 
 
-def build_sheets_service():
-    """gspread (sync.get_sheets_client) nao expoe as credenciais carregadas;
-    o builder de KPI precisa do service raw (googleapiclient) pra batchUpdate
-    de formatacao/merge. Carrega a MESMA credencial de novo, mesmo caminho de
-    sync.get_sheets_client (JSON no ambiente pro CI, arquivo local pro dev)."""
-    import json as _json
-    from googleapiclient.discovery import build
-    from google.oauth2.service_account import Credentials
-
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    if sync.SHEETS_SA_JSON:
-        info = _json.loads(sync.SHEETS_SA_JSON.encode("utf-8").decode("utf-8-sig"))
-        creds = Credentials.from_service_account_info(info, scopes=scopes)
-    else:
-        creds = Credentials.from_service_account_file(sync.SHEETS_SA_FILE, scopes=scopes)
-    return build("sheets", "v4", credentials=creds)
+# Mora em sync.py (base de todo o projeto, sem risco de import circular);
+# alias mantido aqui porque os outros scripts (sync_comunidade.py,
+# sync_primeira_fila.py, sync_sdr_incentivador.py, sync_disparo_incentivador.py)
+# ja fazem `from sync_aprovai import build_sheets_service`.
+build_sheets_service = sync.build_sheets_service
 
 
 if __name__ == "__main__":

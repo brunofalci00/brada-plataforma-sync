@@ -14,6 +14,7 @@ import datetime
 import os
 
 import sync
+import dashboard_charts
 import dashboard_kpi_blocks as kpi
 import ga_analytics
 from sync_aprovai import build_sheets_service
@@ -264,10 +265,15 @@ def main():
 
     gc = sync.get_sheets_client()
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
-    sync.write_overwrite(sh, "raw_comunidade_diario", HEADER_DIARIO, linhas)
-    kpi.publish(sh, build_sheets_service(), sync.SPREADSHEET_ID, "Comunidade",
-                "Comunidade Brada - Membros, uso e conteudo", subtitulo, secoes)
-    print("Comunidade: aba e raw atualizadas.")
+    raw_ws = sync.write_overwrite(sh, "raw_comunidade_diario", HEADER_DIARIO, linhas)
+    svc = build_sheets_service()
+    dest_ws, n_rows = kpi.publish(sh, svc, sync.SPREADSHEET_ID, "Comunidade",
+                                  "Comunidade Brada - Membros, uso e conteudo", subtitulo, secoes)
+    dashboard_charts.publish_line_chart(
+        svc, sync.SPREADSHEET_ID, raw_ws, dest_ws, n_rows=len(linhas) + 1,
+        series_cols=[1, 2, 3], title="Cadastros, primeiras acoes e perfis completos por dia",
+        anchor_row=n_rows + 1)
+    print("Comunidade: aba, raw e grafico atualizados.")
 
 
 if __name__ == "__main__":

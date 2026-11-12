@@ -226,6 +226,24 @@ def leads_automatize_totais(db):
     return {"total": total, "por_estagio": por_estagio}
 
 
+def build_sheets_service():
+    """gspread (get_sheets_client) nao expoe as credenciais carregadas; quem
+    precisa do service raw (googleapiclient) pra batchUpdate de formatacao,
+    merge ou grafico (addChart) usa esta funcao. Mesma credencial de
+    get_sheets_client (JSON no ambiente pro CI, arquivo local pro dev)."""
+    import json as _json
+    from googleapiclient.discovery import build
+    from google.oauth2.service_account import Credentials
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    if SHEETS_SA_JSON:
+        info = _json.loads(SHEETS_SA_JSON.encode("utf-8").decode("utf-8-sig"))
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(SHEETS_SA_FILE, scopes=scopes)
+    return build("sheets", "v4", credentials=creds)
+
+
 def init_firebase_auth():
     import firebase_admin
     from firebase_admin import credentials as fb_credentials
@@ -1043,6 +1061,50 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
             add("leads_automatize_total", estagio, n)
     return snap
 
+# (metrica, segmento, rotulo da coluna). Achado do audit de 11/11: zero
+# grafico nativo em qualquer aba; estas 3 series ja tem historico real em
+# `snap_diario` (ou comecam a ter, no caso dos leads) e viram grafico de linha
+# na aba Plataforma Brada via dashboard_charts.py.
+SERIES_TENDENCIA = [
+    ("projects_por_estoque", "apto", "aptos_a_captar"),
+    ("users_ativos_30d", "(todos)", "users_ativos_30d"),
+    ("leads_automatize_total", "(todos)", "leads_automatize_total"),
+]
+
+
+def _numero_ou_vazio(valor):
+    """`snap_historico` mistura valor de HOJE (int/float, recem-calculado) com
+    valor de dias antigos (sempre string: volta de `read_existing`, que le a
+    planilha de novo). Sem isso, a coluna fica maioria texto e o Sheets
+    descarta a serie inteira do grafico de linha (nao da erro, so some -
+    achado ao verificar visualmente que 2 das 3 series sumiam do grafico)."""
+    if valor == "" or valor is None:
+        return ""
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        try:
+            return float(valor)
+        except (TypeError, ValueError):
+            return ""
+
+
+def build_tendencia_diaria(snap_historico, series=SERIES_TENDENCIA):
+    """Pivota `snap_diario` (formato longo: data/metrica/segmento/valor) pras
+    poucas series escolhidas, em formato largo (1 linha por dia) - e o que um
+    grafico de linha do Sheets precisa como fonte. Dia sem a metrica fica "",
+    nao 0: ausencia de snapshot nao e o mesmo que valor zero (mesmo cuidado
+    de serie_semanal, abaixo)."""
+    por_dia = {}
+    for data_snap, metrica, segmento, valor in snap_historico:
+        for i, (m, s, _) in enumerate(series):
+            if metrica == m and segmento == s:
+                por_dia.setdefault(data_snap, [""] * len(series))[i] = _numero_ou_vazio(valor)
+    header = ["dia"] + [rotulo for _, _, rotulo in series]
+    rows = [[dia] + valores for dia, valores in sorted(por_dia.items())]
+    return header, rows
+
+
 def serie_semanal(snap_all, metrica, now_brt, segmento="(todos)"):
     """Ultimo valor de `metrica` em cada uma das 8 ultimas semanas (seg-dom).
 
@@ -1496,6 +1558,7 @@ def write_overwrite(sh, name, header, rows):
     sh.batch_update({"requests": [analytics.atomic_replace_request(
         ws.id, ws.row_count, ws.col_count, header, rows)]})
     print(f"  {name}: {len(rows)} linhas (overwrite)")
+    return ws
 
 
 def write_snapshot_idempotente(sh, snap_rows, today_str):
@@ -1786,11 +1849,23 @@ def main():
     # preserva atributos recebidos e fica explícita no manifesto de cobertura.
     if leads_rows is not None:
         write_overwrite(sh, "raw_leads_automatize", HEADER_LEADS_AUTOMATIZE, leads_rows)
+    tendencia_header, tendencia_rows = build_tendencia_diaria(snap_historico)
+    tendencia_ws = write_overwrite(sh, "raw_tendencia_diaria", tendencia_header, tendencia_rows)
     # Dashboard POR ULTIMO: o carimbo de atualizacao so avanca se tudo acima passou
+    import dashboard_analytics
     import dashboard_layout
     status_layout = dashboard_layout.ensure_dashboard(sh, metrics, now_brt.replace(tzinfo=None))
     write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
     print(f"  Dashboard: valores atualizados | {status_layout}")
+
+    import dashboard_charts
+    plataforma_ws = sh.worksheet(dashboard_analytics.TAB_TITLE)
+    dashboard_charts.publish_line_chart(
+        build_sheets_service(), SPREADSHEET_ID, tendencia_ws, plataforma_ws,
+        n_rows=len(tendencia_rows) + 1, series_cols=[1, 2, 3],
+        title="Aptos a captar, usuarios ativos e leads reais por dia", anchor_row=125,
+        right_axis_cols=[3])  # leads_automatize_total e ~100x maior; achataria as outras 2 no eixo esquerdo
+    print("  Tendencia: grafico atualizado")
     print(f"plataforma_sync: OK | users={len(users_rows)} projects={len(projects_rows)} "
           f"proposals={len(proposals_rows)} | {round(time.time() - t0, 1)}s")
 

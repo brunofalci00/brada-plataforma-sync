@@ -6,7 +6,7 @@ import ga_analytics
 # Bump obrigatorio quando muda a FORMA da aba: `publish` so reaplica layout se o
 # Z1 divergir, e sem isso a caixa mesclada do 4o cartao da linha 26 (que saiu)
 # ficaria formatada e vazia na planilha.
-VERSION = "v7.4-leads-real"
+VERSION = "v7.5-tendencia-chart"
 ROWS = 145
 ORANGE = {"red": .773, "green": .353, "blue": .067}
 INK = {"red": .27, "green": .27, "blue": .27}
@@ -138,6 +138,7 @@ def model(m, now):
     text(118, "Páginas mais vistas (Google Analytics)", "header")
     top = ((ga["top"] if ga else []) + [(None, "")] * ga_analytics.TOP_PAGINAS)[:ga_analytics.TOP_PAGINAS]
     table(119, [(nome or "Sem dados no período", vistas) for vistas, nome in top])
+    text(125, "Tendência (gráfico nativo) · Aptos a captar, usuários ativos e leads reais por dia", "header")
     return cells, blocks
 
 

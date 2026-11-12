@@ -93,6 +93,43 @@ def test_build_snapshot_sem_leads_automatize_nao_quebra():
         [], [], [], "2026-11-11", leads_automatize=None)
 
 
+def test_build_tendencia_diaria_pivota_formato_longo_pra_largo():
+    snap = [
+        ["2026-11-10", "projects_por_estoque", "apto", 380],
+        ["2026-11-10", "users_ativos_30d", "(todos)", 70],
+        ["2026-11-10", "outra_metrica", "ignorada", 999],
+        ["2026-11-11", "projects_por_estoque", "apto", 390],
+        ["2026-11-11", "users_ativos_30d", "(todos)", 71],
+        ["2026-11-11", "leads_automatize_total", "(todos)", 53183],
+    ]
+    header, rows = sync.build_tendencia_diaria(snap)
+    assert header == ["dia", "aptos_a_captar", "users_ativos_30d", "leads_automatize_total"]
+    assert rows == [
+        ["2026-11-10", 380, 70, ""],
+        ["2026-11-11", 390, 71, 53183],
+    ]
+
+
+def test_build_tendencia_diaria_vazio_nao_quebra():
+    header, rows = sync.build_tendencia_diaria([])
+    assert rows == []
+    assert header[0] == "dia"
+
+
+def test_build_tendencia_diaria_converte_string_do_historico_em_numero():
+    # Dia antigo volta de read_existing como string (lido da planilha); dia de
+    # hoje chega como int (calculado na hora). As duas formas tem que virar
+    # numero de verdade, senao o Sheets descarta a serie do grafico de linha.
+    snap = [
+        ["2026-11-10", "projects_por_estoque", "apto", "380"],
+        ["2026-11-11", "projects_por_estoque", "apto", 390],
+    ]
+    header, rows = sync.build_tendencia_diaria(snap)
+    valores = [r[1] for r in rows]
+    assert valores == [380, 390]
+    assert all(isinstance(v, int) for v in valores)
+
+
 def test_build_snapshot_leads_automatize_total_real_e_por_estagio():
     snap = sync.build_snapshot([], [], [], "2026-11-11",
                                 leads_automatize={"total": 53183, "por_estagio": {"novo": 44351, "arquivado": 439}})
