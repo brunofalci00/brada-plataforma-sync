@@ -18,6 +18,7 @@ import unicodedata
 
 LARGURA_COL = 100
 N_COLS = 12
+COLUNAS_ABA = 26  # a aba mantem A..Z; o painel ocupa so as N_COLS primeiras
 ALTURA_LINHA = 21
 CONTEUDO = N_COLS * LARGURA_COL
 GAP = 20
@@ -481,7 +482,8 @@ class Painel:
         reqs += [{"unmergeCells": {"range": {"sheetId": painel_id}}},
                  {"updateCells": {"range": {"sheetId": painel_id}, "fields": "userEnteredValue,userEnteredFormat"}},
                  {"updateSheetProperties": {"properties": {"sheetId": painel_id, "gridProperties": {
-                     "rowCount": n_linhas, "columnCount": N_COLS, "hideGridlines": True, "frozenRowCount": 0}},
+                     "rowCount": n_linhas, "columnCount": COLUNAS_ABA, "hideGridlines": True,
+                     "frozenRowCount": 0}},
                      "fields": "gridProperties(rowCount,columnCount,hideGridlines,frozenRowCount)"}},
                  {"updateDimensionProperties": {"range": {"sheetId": painel_id, "dimension": "COLUMNS",
                                                           "startIndex": 0, "endIndex": N_COLS},
