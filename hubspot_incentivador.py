@@ -1,25 +1,19 @@
 """
-Sync SDR Incentivador -> Google Sheets (aba `SDR Incentivador` +
-raw_hubspot_incentivador na mesma Sheet `Brada_Dashboard_Produtos`).
+HubSpot, pipeline Incentivador (`default`): leitura para a aba `Incentivador`.
 
-Responde a pergunta operacional: quantos cards do pipeline Incentivador (HubSpot,
-pipeline `default`) foram criados pela Automatize, e quantos avancaram ate
-"[EV] Reuniao Agendada" ou alem — separando o caminho automatico (a propria
-integracao move o card) do caminho manual (executivo move a mao, ou card ja
-nasce la por feira/evento/indicacao).
+- `coletar()`: total de cards por `trabalhado_por` (Automatize x Executivo Brada) e
+  os deals que estao em "[EV] Reuniao Agendada" ou alem, com o caminho pelo qual
+  chegaram la (automatico pela integracao, manual, ou ja criado na fase).
+- `estagios_ao_vivo()`: estagio ATUAL de uma lista de deals (o banco da Automatize
+  guarda so o estagio de quando o card foi criado).
 
-Custo de API: so busca o historico de dealstage (1 GET por deal) dos deals que
-JA estao em Reuniao Agendada ou alem — nao dos ~760 do pipeline inteiro.
+Custo de API: o historico de dealstage (1 GET por deal) so e lido para quem ja esta
+em reuniao ou alem, nao para o pipeline inteiro.
 
-PII: dealname e nome de empresa/projeto (negocio B2B), nao de pessoa fisica —
-nao entra no escopo do pii_guard. deal_id e owner_id ficam na isencao de digitos
-de sync.py (ver COLUNAS_ISENTAS_DIGITOS).
-
-Rodar local: python sync_sdr_incentivador.py --dry-run
+PII: dealname e nome de empresa/projeto (negocio B2B), nao de pessoa fisica.
+deal_id e owner_id ficam na isencao de digitos de sync.py (COLUNAS_ISENTAS_DIGITOS).
 """
 
-import argparse
-import datetime
 import json
 import os
 import time
@@ -27,7 +21,6 @@ import urllib.error
 import urllib.request
 
 import sync
-import dashboard_kpi_blocks as kpi
 
 HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN", "")
 sync._load_local_env(os.path.expanduser(r"~/.brada-secrets/hubspot.env"))
@@ -63,12 +56,11 @@ HEADER_RAW = [
     "estagio_atual", "como_chegou_em_reuniao", "source_id", "data_criacao",
 ]
 
+HS_MAX_TENTATIVAS = 6
+
 
 def hs_headers():
     return {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
-
-
-HS_MAX_TENTATIVAS = 6
 
 
 def hs_request(req):
@@ -159,86 +151,16 @@ def coletar():
     }
 
 
-def montar_secoes(dados):
-    total_automatize = dados["total_automatize"]
-    total_executivo = dados["total_executivo"]
-    total_pipeline = total_automatize + total_executivo
-    pct_automatize = (total_automatize / total_pipeline) if total_pipeline else 0
-
-    rows = dados["rows"]
-    total_beyond = len(rows)
-    beyond_automatize = sum(1 for r in rows if r[2] == "Automatize")
-    beyond_executivo = sum(1 for r in rows if r[2] == "Executivo Brada")
-    taxa_automatize = (beyond_automatize / total_automatize) if total_automatize else 0
-
-    sec1 = kpi.Secao(
-        "Volume por canal (todo o historico)",
-        [
-            (total_automatize, "Cards criados pela Automatize", None),
-            (total_executivo, "Cards trabalhados por Executivo Brada", None),
-            (pct_automatize, "% do pipeline que e Automatize", {"type": "PERCENT", "pattern": "0%"}),
-            (total_pipeline, "Total no pipeline Incentivador", None),
-        ],
-        nota="Cards = deals no pipeline Incentivador (default), filtrados por trabalhado_por.",
-    )
-
-    sec2 = kpi.Secao(
-        "Quem chega em Reuniao Agendada ou alem",
-        [
-            (total_beyond, "Chegaram em reuniao ou alem (total)", None),
-            (beyond_automatize, "Vindos da Automatize", None),
-            (beyond_executivo, "Vindos de Executivo Brada", None),
-            (taxa_automatize, "Taxa de conversao Automatize (inbound -> reuniao)",
-             {"type": "PERCENT", "pattern": "0.0%"}),
-        ],
-        nota=(
-            f"Dos {total_beyond} que chegaram em reuniao+, {beyond_executivo} sao Executivo Brada e "
-            f"{beyond_automatize} e Automatize. Detalhe deal a deal, com a origem de cada transicao "
-            "(automatica via integracao, manual no CRM, ou importacao em lote), em raw_hubspot_incentivador."
-        ),
-        nota_aviso=True,
-    )
-    return [sec1, sec2]
-
-
-def main():
-    ap = argparse.ArgumentParser(description="Sync SDR Incentivador -> Sheets")
-    ap.add_argument("--dry-run", action="store_true")
-    args = ap.parse_args()
-
-    if not HUBSPOT_TOKEN:
-        raise SystemExit("HUBSPOT_TOKEN nao configurado.")
-
-    now = datetime.datetime.now(sync.BRT)
-    print("Puxando HubSpot (pipeline Incentivador)...")
-    dados = coletar()
-    print(f"  {dados['total_automatize']} Automatize | {dados['total_executivo']} Executivo Brada | "
-          f"{len(dados['rows'])} em reuniao+")
-
-    tabs = {"raw_hubspot_incentivador": (HEADER_RAW, dados["rows"])}
-    sync.pii_guard(tabs)
-    print("pii_guard: OK (zero hits)")
-
-    secoes = montar_secoes(dados)
-    subtitulo = f"Foto: {now.strftime('%d/%m/%Y %H:%M')} (Brasilia) - HubSpot, pipeline Incentivador (default), historico completo"
-
-    if args.dry_run:
-        print("\n--dry-run: nada escrito na Sheet.")
-        print(f"  raw_hubspot_incentivador: {len(dados['rows'])} linhas")
-        for secao in secoes:
-            print(f"  [{secao.titulo}]", secao.metricas)
-        return
-
-    gc = sync.get_sheets_client()
-    sh = gc.open_by_key(sync.SPREADSHEET_ID)
-    sync.write_overwrite(sh, "raw_hubspot_incentivador", HEADER_RAW, dados["rows"])
-
-    from sync_aprovai import build_sheets_service
-    svc = build_sheets_service()
-    kpi.publish(sh, svc, sync.SPREADSHEET_ID, "SDR Incentivador",
-                "SDR Incentivador — Automatize x Executivos", subtitulo, secoes)
-    print("SDR Incentivador: aba e raw atualizadas.")
-
-
-if __name__ == "__main__":
-    main()
+def estagios_ao_vivo(deal_ids):
+    """Estagio ATUAL no HubSpot pra cada deal_id, em lotes de 100 (limite do batch/read)."""
+    if not HUBSPOT_TOKEN or not deal_ids:
+        return {}
+    estagios = {}
+    for i in range(0, len(deal_ids), 100):
+        lote = deal_ids[i:i + 100]
+        resp = hs_post("https://api.hubapi.com/crm/v3/objects/deals/batch/read", {
+            "inputs": [{"id": d} for d in lote], "properties": ["dealstage"],
+        })
+        for r in resp.get("results", []):
+            estagios[r["id"]] = r["properties"].get("dealstage")
+    return estagios

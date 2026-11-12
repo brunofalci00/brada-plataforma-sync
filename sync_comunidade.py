@@ -14,10 +14,8 @@ import datetime
 import os
 
 import sync
-import dashboard_charts
-import dashboard_kpi_blocks as kpi
+import dashboard_painel as dp
 import ga_analytics
-from sync_aprovai import build_sheets_service
 
 PROJETO = "brada-comunidade-c1ba5"
 DATABASE = "default"
@@ -30,7 +28,6 @@ URL_AUTH = f"https://identitytoolkit.googleapis.com/v1/projects/{PROJETO}/accoun
 COMUNIDADE_SA_FILE = os.environ.get(
     "COMUNIDADE_SA_FILE", os.path.expanduser(r"~/.brada-secrets/comunidade-dashboard-sa.json"))
 
-PCT = {"type": "PERCENT", "pattern": "0.0%"}
 DIA_MS = 86_400_000
 
 HEADER_DIARIO = ["dia", "cadastros", "primeiras_acoes", "perfis_completos"]
@@ -178,67 +175,56 @@ def diario(dados):
     return [[d, *v] for d, v in sorted(contagem.items())]
 
 
-def _secoes_ga(ga):
-    if not ga:
-        return [kpi.Secao("Visitas (Google Analytics)", [
-            ("-", "Sem leitura do Google Analytics nesta rodada", None)], nota_aviso=True,
-            nota="A conta dashboard-leitura precisa do papel Leitor na propriedade.")]
-    return [
-        kpi.Secao("Visitas nos ultimos 30 dias (Google Analytics)", [
-            (ga["ativos"], "Visitantes ativos (com e sem cadastro)", None),
-            (ga["recorrentes"], "Visitantes que voltaram", None),
-            (ga["taxa_retorno"], "Parte dos visitantes que voltou", PCT),
-            (ga["paginas_vistas"], "Paginas vistas", None),
-        ], nota="Fonte: propriedade G-HE11117R0R, com dados desde novembro. "
-                "A propriedade principal (G-WKKG4NJ3TV) ainda nao foi liberada.", nota_aviso=True),
-        kpi.Secao("Paginas mais vistas nos ultimos 30 dias", [
-            (vistas, nome, None) for vistas, nome in ga["top"]
-        ] or [(0, "Sem visitas no periodo", None)],
-           nota="Pelo nome da tela: o app tem um endereco so, entao toda pagina aparece como \"/\"."),
-    ]
+def por_semana(linhas, hoje, n=10):
+    """Soma o diario (dia, cadastros, primeiras_acoes, perfis) por semana, segunda a domingo."""
+    ini = hoje - datetime.timedelta(days=hoje.weekday())
+    semanas = [ini - datetime.timedelta(weeks=i) for i in range(n - 1, -1, -1)]
+    cont = {s: [0, 0] for s in semanas}
+    for dia, cadastros, acoes, _ in linhas:
+        try:
+            d = datetime.date.fromisoformat(dia)
+        except ValueError:
+            continue
+        s = d - datetime.timedelta(days=d.weekday())
+        if s in cont:
+            cont[s][0] += cadastros
+            cont[s][1] += acoes
+    return [[s.strftime("%d/%m"), *v] for s, v in cont.items()]
 
 
-def montar_secoes(m):
-    return _secoes_ga(m.get("ga")) + [
-        kpi.Secao("Membros", [
-            (m["membros"], "Membros cadastrados", None),
-            (m["cadastros_mes"], "Cadastros neste mes", None),
-            (m["onboarding"], "Concluiram o onboarding", PCT),
-            (m["quiz"], "Fizeram o quiz de impacto", None),
-        ], nota=f"Sem as {m['equipe']} contas da equipe (Brada, CRIAPE e admins)."),
-        kpi.Secao("Perfis", [
-            (m["explorador"], "Exploradores", None),
-            (m["idealizador"], "Idealizadores", None),
-            (m["incentivador"], "Incentivadores", None),
-            (m["viabilizador"], "Viabilizadores", None),
-        ]),
-        kpi.Secao("Uso", [
-            (m["login_7d"], "Entraram nos ultimos 7 dias", None),
-            (m["login_30d"], "Entraram nos ultimos 30 dias", None),
-            (m["voltaram_7d"], "Voltaram 7 dias ou mais depois do cadastro", PCT),
-            (m["primeira_acao"], "Fizeram uma primeira acao relevante", None),
-        ], nota="O login so conta quando a pessoa entra de novo; sessao aberta nao conta. "
-                "Por isso o retorno sai abaixo do real. O numero exato fica no Google Analytics.",
-           nota_aviso=True),
-        kpi.Secao("Rede", [
-            (m["posts"], "Posts no feed", None),
-            (m["conexoes_aceitas"], "Conexoes aceitas", None),
-            (m["conexoes_pendentes"], "Conexoes pendentes", None),
-            (m["mensagens"], "Mensagens diretas", None),
-        ]),
-        kpi.Secao("Conteudo", [
-            (m["noticias_publicadas"], "Noticias publicadas", None),
-            (m["noticias_pendentes"], "Noticias esperando aprovacao", None),
-            (m["leituras"], "Leituras de noticias", None),
-            (m["inscritos_cursos"], "Inscricoes em cursos", None),
-        ], nota=f"{m['cursos_com_inscritos']} de {m['cursos']} cursos tem inscritos."),
-        kpi.Secao("Oportunidades e eventos", [
-            (m["editais_abertos"], "Editais abertos no radar", None),
-            (m["editais_breve"], "Editais abrindo em breve", None),
-            (m["eventos"], "Eventos na agenda", None),
-            (m["acao_evento"], "Cliques em inscricao de evento", None),
-        ]),
-    ]
+def montar_painel(m, linhas, agora):
+    ga = m.get("ga")
+    p = dp.Painel("Comunidade", "Comunidade Brada · da visita a rede",
+                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore e Auth da Comunidade + Google Analytics"
+                  f" · sem as {m['equipe']} contas da equipe")
+    p.linha(dp.Cartao("Visitantes (30 dias)", ga["ativos"] if ga else 0),
+            dp.Cartao("Membros", m["membros"]),
+            dp.Cartao("Cadastros no mes", m["cadastros_mes"]),
+            dp.Cartao("Visitantes que voltaram", ga["taxa_retorno"] if ga else 0, dp.FMT_PCT))
+    p.linha(dp.Funil("Jornada do membro", [
+                ("Cadastraram", m["membros"]), ("Concluiram o onboarding", round(m["onboarding"] * m["membros"])),
+                ("Fizeram uma primeira acao", m["primeira_acao"])],
+                subtitulo="% sobre os membros", altura=320),
+            dp.Rosca("Perfis dos membros", [("Explorador", m["explorador"]), ("Idealizador", m["idealizador"]),
+                                            ("Incentivador", m["incentivador"]), ("Viabilizador", m["viabilizador"])],
+                     altura=320))
+    p.linha(dp.Serie("Cadastros e primeiras acoes por semana", ["Semana", "Cadastros", "Primeiras acoes"],
+                     por_semana(linhas, agora.date())),
+            dp.Serie("Rede e conteudo", ["Item", "Total"], [
+                ["Posts no feed", m["posts"]], ["Conexoes aceitas", m["conexoes_aceitas"]],
+                ["Mensagens diretas", m["mensagens"]], ["Noticias publicadas", m["noticias_publicadas"]],
+                ["Inscricoes em cursos", m["inscritos_cursos"]], ["Cliques em eventos", m["acao_evento"]]],
+                tipo="BAR"))
+    if ga and ga["top"]:
+        p.linha(dp.Tabela("Telas mais vistas (30 dias)", ["Tela", "Visualizacoes"],
+                          [[nome, vistas] for vistas, nome in ga["top"]], formatos=[None, dp.FMT_INT],
+                          gradiente=[1]))
+    resumo = {"comunidade_membros": m["membros"], "comunidade_cadastros_mes": m["cadastros_mes"],
+              "comunidade_primeira_acao": m["primeira_acao"], "comunidade_login_30d": m["login_30d"],
+              "comunidade_voltaram_7d": m["voltaram_7d"]}
+    if ga:
+        resumo.update({"comunidade_visitantes_30d": ga["ativos"], "comunidade_retorno": ga["taxa_retorno"]})
+    return p, resumo
 
 
 def main():
@@ -253,27 +239,20 @@ def main():
     linhas = diario(dados)
     tabs = {"raw_comunidade_diario": (HEADER_DIARIO, linhas)}
     sync.pii_guard(tabs)
-    secoes = montar_secoes(metricas)
-    subtitulo = (f"Foto: {agora.strftime('%d/%m/%Y %H:%M')} (Brasilia) - base da Comunidade Brada "
-                 "(brada.social). Acumulado desde o lancamento, salvo indicacao")
+    painel, resumo = montar_painel(metricas, linhas, agora)
 
     if args.dry_run:
-        for secao in secoes:
-            print(f"  [{secao.titulo}]", [(v, r) for v, r, _ in secao.metricas])
+        print("  resumo:", resumo)
         print(f"  raw_comunidade_diario: {len(linhas)} dias")
         return
 
     gc = sync.get_sheets_client()
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
-    raw_ws = sync.write_overwrite(sh, "raw_comunidade_diario", HEADER_DIARIO, linhas)
-    svc = build_sheets_service()
-    dest_ws, n_rows = kpi.publish(sh, svc, sync.SPREADSHEET_ID, "Comunidade",
-                                  "Comunidade Brada - Membros, uso e conteudo", subtitulo, secoes)
-    dashboard_charts.publish_line_chart(
-        svc, sync.SPREADSHEET_ID, raw_ws, dest_ws, n_rows=len(linhas) + 1,
-        series_cols=[1, 2, 3], title="Cadastros, primeiras acoes e perfis completos por dia",
-        anchor_row=n_rows + 1)
-    print("Comunidade: aba, raw e grafico atualizados.")
+    sync.write_overwrite(sh, "raw_comunidade_diario", HEADER_DIARIO, linhas)
+    svc = sync.build_sheets_service()
+    painel.publicar(sh, svc, sync.SPREADSHEET_ID)
+    dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo, agora)
+    print("Comunidade: aba e raw atualizados.")
 
 
 if __name__ == "__main__":

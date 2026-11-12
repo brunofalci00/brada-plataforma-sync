@@ -139,22 +139,6 @@ def test_build_snapshot_leads_automatize_total_real_e_por_estagio():
     assert ("2026-11-11", "leads_automatize_total", "novo", 44351) in [tuple(r) for r in linhas]
 
 
-def test_layout_request_rectangles_and_visible_rows():
-    import dashboard_analytics as d
-    from collections import defaultdict
-    m = defaultdict(int)
-    m.update(funil={k: 0 for k in fixture()['expected']}, automatize={k: 0 for k in fixture()['expected']}, fontes=a.source_health({}, False, '2026-09-04', {}),
-             canais={}, semanas=[], semanas_ativos=[], mes_atual_rotulo='Parcial', mes_anterior_rotulo='Completo')
-    reqs = d.requests(1, m, datetime.datetime(2026, 9, 4), {'sheets': [{'properties': {'sheetId': 1, 'gridProperties': {'rowCount': 100}}}]}, True)
-    assert any(r.get('updateDimensionProperties', {}).get('properties', {}).get('hiddenByUser') is False for r in reqs)
-    for r in reqs:
-        if 'updateCells' in r:
-            v = r['updateCells']
-            area = v['range']
-            assert len(v['rows']) == area['endRowIndex'] - area['startRowIndex']
-            assert all(len(row['values']) == area['endColumnIndex'] - area['startColumnIndex'] for row in v['rows'])
-
-
 def _projeto(status, situacao, expira=""):
     """Linha de raw_projects com so o que as reguas de estoque leem."""
     linha = dict.fromkeys(sync.HEADER_PROJECTS, "")

@@ -56,12 +56,31 @@ def test_base_vazia_nao_divide_por_zero():
     assert m["onboarding"] == 0 and m["voltaram_7d"] == 0
 
 
-def test_secoes_e_diario_sem_equipe():
-    d = _dados()
-    assert [len(s.metricas) for s in sc.montar_secoes(sc.calcular(d, AGORA))] == [1] + [4] * 6
-    linhas = sc.diario(d)
+AGORA_DT = datetime.datetime(2026, 11, 10, 12, tzinfo=datetime.timezone.utc)
+
+
+def _componente(painel, titulo):
+    return next(c for linha in painel.linhas for c in linha if getattr(c, "titulo", "") == titulo)
+
+
+def test_diario_sem_equipe():
+    linhas = sc.diario(_dados())
     assert ["2026-11-03", 0, 1, 1] in linhas
     assert not any(l[0] == "2026-11-01" for l in linhas)
+
+
+def test_por_semana_soma_cadastros_e_acoes_na_semana_certa():
+    linhas = [["2026-11-02", 2, 1, 0], ["2026-11-08", 3, 0, 0], ["2026-11-09", 1, 4, 0], ["lixo", 9, 9, 9]]
+    semanas = dict((s, (c, a)) for s, c, a in sc.por_semana(linhas, datetime.date(2026, 11, 10), n=2))
+    assert semanas == {"02/11": (5, 1), "09/11": (1, 4)}
+
+
+def test_painel_sem_ga_tem_jornada_que_nunca_sobe():
+    m = sc.calcular(_dados(), AGORA)
+    painel, resumo = sc.montar_painel(m, sc.diario(_dados()), AGORA_DT)
+    etapas = [v for _, v in _componente(painel, "Jornada do membro").etapas]
+    assert etapas == sorted(etapas, reverse=True)
+    assert resumo["comunidade_membros"] == 2 and "comunidade_visitantes_30d" not in resumo
 
 
 GA = {
@@ -80,8 +99,10 @@ def test_resumo_ga_retorno_e_top_paginas():
     assert len(r["top"]) == ga_analytics.TOP_PAGINAS
 
 
-def test_secoes_com_ga_vem_primeiro():
+def test_painel_com_ga_tem_tabela_de_telas_e_retorno_no_resumo():
     m = sc.calcular(_dados(ga=GA), AGORA)
-    secoes = sc.montar_secoes(m)
-    assert secoes[0].titulo.startswith("Visitas") and len(secoes) == 8
+    painel, resumo = sc.montar_painel(m, [], AGORA_DT)
+    tabela = _componente(painel, "Telas mais vistas (30 dias)")
+    assert tabela.linhas[0] == ["Entrar ou Criar Conta", 50.0]
+    assert resumo["comunidade_retorno"] == 0.25
     assert sc.resumo_ga(None) is None

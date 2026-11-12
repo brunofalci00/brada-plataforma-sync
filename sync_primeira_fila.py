@@ -13,14 +13,9 @@ import datetime
 import os
 
 import sync
-import dashboard_charts
-import dashboard_kpi_blocks as kpi
-from sync_aprovai import build_sheets_service
+import dashboard_painel as dp
 
 SECRETS_FILE = os.path.expanduser("~/.brada-secrets/automatize-primeira-fila-dados.env")
-
-BRL = {"type": "CURRENCY", "pattern": "R$#,##0.00"}
-PCT = {"type": "PERCENT", "pattern": "0.0%"}
 
 HEADER_DIARIO = ["dia", "cliques_anuncios", "reservas_criadas", "perfis_criados", "leads_hunter_captados"]
 
@@ -43,7 +38,6 @@ PERFIS_TESTE = [
     "1eb9c0d9-7467-45b7-968f-02b192433b21",
 ]
 
-URL_EQUIPE = "https://www.primeira-fila.com/equipe"
 
 # CTEs reutilizadas: o que e real = fora da lista de teste.
 BASE = """
@@ -157,44 +151,51 @@ def coletar(conn):
     return dados
 
 
-def _taxa(parte, todo):
-    return parte / todo if todo else 0
+def por_semana(diario, hoje, colunas, n=10):
+    """Soma colunas do diario (dia ISO na coluna 0) por semana, segunda a domingo."""
+    ini = hoje - datetime.timedelta(days=hoje.weekday())
+    semanas = [ini - datetime.timedelta(weeks=i) for i in range(n - 1, -1, -1)]
+    cont = {s: [0] * len(colunas) for s in semanas}
+    for linha in diario:
+        d = datetime.date.fromisoformat(linha[0])
+        s = d - datetime.timedelta(days=d.weekday())
+        if s in cont:
+            for i, c in enumerate(colunas):
+                cont[s][i] += linha[c] or 0
+    return [[s.strftime("%d/%m"), *v] for s, v in cont.items()]
 
 
-def montar_secoes(dados):
+def montar_painel(dados, agora):
     e, a, p, r, h = (dados[k] for k in ("espacos", "anfitrioes", "procura", "reservas", "hunter"))
-    return [
-        kpi.Secao("Espacos anunciados", [
-            (e["cadastrados"], "Espacos cadastrados", None),
-            (e["no_ar"], "No ar hoje (publicados e ativos)", None),
-            (e["em_revisao"], "Em revisao ou ajuste", None),
-        ], nota=f"Anuncios em revisao: conferir na area da equipe, {URL_EQUIPE}"),
-        kpi.Secao("Anfitrioes", [
-            (a["perfis"], "Perfis cadastrados", None),
-            (a["plano_rede"], "No plano Rede", None),
-            (a["plano_basico"], "No plano Basico", None),
-            (a["contas_recebimento"], "Com conta de recebimento ativa", None),
-        ], nota=f"Sem os {len(PERFIS_TESTE)} perfis de teste e da equipe, nem os espacos, reservas, cliques e conversas ligados a eles."),
-        kpi.Secao("Procura dos organizadores", [
-            (p["cliques_total"], "Cliques em anuncios (desde o lancamento)", None),
-            (p["cliques_30d"], "Cliques nos ultimos 30 dias", None),
-            (p["conversas"], "Conversas abertas no chat", None),
-            (p["pedidos_reserva"], "Pedidos de reserva", None),
-        ]),
-        kpi.Secao("Reservas e dinheiro", [
-            (r["pagas"], "Reservas pagas e validas", None),
-            (r["valor_pago"], "Valor pago pelos organizadores", BRL),
-            (r["comissao"], "Comissao da Primeira Fila", BRL),
-            (r["canceladas_expiradas"], "Canceladas ou expiradas", None),
-        ], nota="Pago = pagamento confirmado e reserva nao cancelada. Reserva confirmada sem pagamento nao conta.",
-           nota_aviso=True),
-        kpi.Secao("Hunter (prospeccao de espacos pela Automatize)", [
-            (h["captados"], "Espacos captados pelo robo", None),
-            (h["abordados"], "Abordados no WhatsApp", None),
-            (h["responderam"], "Responderam", None),
-            (_taxa(h["cadastraram"], h["abordados"]), "Abordados que se cadastraram", PCT),
-        ]),
-    ]
+    hoje = agora.date()
+    painel = dp.Painel("Primeira Fila", "Primeira Fila · do espaco anunciado a reserva paga",
+                       f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco da Primeira Fila"
+                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe")
+    painel.linha(dp.Cartao("Espacos no ar", e["no_ar"]),
+                 dp.Cartao("Cliques em anuncios (30 dias)", p["cliques_30d"]),
+                 dp.Cartao("Reservas pagas", r["pagas"]),
+                 dp.Cartao("Valor pago", r["valor_pago"], dp.FMT_BRL))
+    painel.linha(dp.Funil("Organizadores: do clique a reserva", [
+                     ("Cliques em anuncios", p["cliques_total"]), ("Conversas no chat", p["conversas"]),
+                     ("Pedidos de reserva", p["pedidos_reserva"]), ("Reservas pagas", r["pagas"])],
+                     subtitulo="Desde o lancamento · % sobre os cliques"),
+                 dp.Funil("Hunter: da captacao ao cadastro", [
+                     ("Espacos captados", h["captados"]), ("Abordados no WhatsApp", h["abordados"]),
+                     ("Responderam", h["responderam"]), ("Cadastraram", h["cadastraram"])],
+                     subtitulo="Prospeccao da Automatize · % sobre os captados"))
+    painel.linha(dp.Serie("Cliques e pedidos por semana", ["Semana", "Cliques", "Pedidos de reserva"],
+                          por_semana(dados["diario"], hoje, [1, 2])),
+                 dp.Rosca("Espacos cadastrados", [("No ar", e["no_ar"]), ("Em revisao", e["em_revisao"]),
+                                                  ("Pausados ou ocultos",
+                                                   e["cadastrados"] - e["no_ar"] - e["em_revisao"])]))
+    painel.linha(dp.Serie("Anfitrioes e leads do Hunter por semana", ["Semana", "Perfis criados", "Leads do Hunter"],
+                          por_semana(dados["diario"], hoje, [3, 4])),
+                 dp.Rosca("Anfitrioes por plano", [("Rede", a["plano_rede"]), ("Basico", a["plano_basico"]),
+                                                   ("Sem plano", a["perfis"] - a["plano_rede"] - a["plano_basico"])]))
+    resumo = {"pf_espacos_no_ar": e["no_ar"], "pf_cliques_30d": p["cliques_30d"], "pf_cliques_total": p["cliques_total"],
+              "pf_pedidos": p["pedidos_reserva"], "pf_reservas_pagas": r["pagas"], "pf_valor_pago": r["valor_pago"],
+              "pf_anfitrioes": a["perfis"]}
+    return painel, resumo
 
 
 def main():
@@ -212,27 +213,20 @@ def main():
 
     tabs = {"raw_primeira_fila_diario": (HEADER_DIARIO, dados["diario"])}
     sync.pii_guard(tabs)
-    secoes = montar_secoes(dados)
-    subtitulo = (f"Foto: {now.strftime('%d/%m/%Y %H:%M')} (Brasilia) - banco da Primeira Fila "
-                 "(acesso de leitura liberado pela Automatize). Acumulado desde o lancamento, salvo indicacao")
+    painel, resumo = montar_painel(dados, now)
 
     if args.dry_run:
-        for secao in secoes:
-            print(f"  [{secao.titulo}]", [(v, r) for v, r, _ in secao.metricas])
+        print("  resumo:", resumo)
         print(f"  raw_primeira_fila_diario: {len(dados['diario'])} dias")
         return
 
     gc = sync.get_sheets_client()
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
-    raw_ws = sync.write_overwrite(sh, "raw_primeira_fila_diario", HEADER_DIARIO, dados["diario"])
-    svc = build_sheets_service()
-    dest_ws, n_rows = kpi.publish(sh, svc, sync.SPREADSHEET_ID, "Primeira Fila",
-                                  "Primeira Fila - Espacos, procura e reservas", subtitulo, secoes)
-    dashboard_charts.publish_line_chart(
-        svc, sync.SPREADSHEET_ID, raw_ws, dest_ws, n_rows=len(dados["diario"]) + 1,
-        series_cols=[1, 2, 3, 4], title="Cliques, reservas, perfis e leads do Hunter por dia",
-        anchor_row=n_rows + 1)
-    print("Primeira Fila: aba, raw e grafico atualizados.")
+    sync.write_overwrite(sh, "raw_primeira_fila_diario", HEADER_DIARIO, dados["diario"])
+    svc = sync.build_sheets_service()
+    painel.publicar(sh, svc, sync.SPREADSHEET_ID)
+    dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo, now)
+    print("Primeira Fila: aba e raw atualizados.")
 
 
 if __name__ == "__main__":

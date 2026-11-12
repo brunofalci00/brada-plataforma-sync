@@ -28,8 +28,7 @@ import urllib.request
 from collections import Counter
 
 import sync  # reusa auth Sheets, hash_id, pii_guard, write_overwrite, retry
-import dashboard_charts
-import dashboard_kpi_blocks as kpi
+import dashboard_painel as dp
 import ga_analytics
 
 # ===================================================
@@ -226,61 +225,104 @@ def coletar_funil_rows(db):
 # DASHBOARD
 # ===================================================
 
-def montar_secoes(funil_rows, resumo, pre_approvals):
-    total_views = sum(r[1] for r in funil_rows)
-    total_clicks = sum(r[2] for r in funil_rows)
-    total_leads = sum(r[3] for r in funil_rows)
+SITUACAO_COBRANCA = {"RECEIVED": "Pagas", "CONFIRMED": "Pagas", "RECEIVED_IN_CASH": "Pagas",
+                     "REFUNDED": "Estornadas", "REFUND_REQUESTED": "Estornadas", "PENDING": "Pendentes",
+                     "OVERDUE": "Vencidas"}
 
-    sec1 = kpi.Secao(
-        "Funil da landing (via Firestore, historico completo)",
-        [
-            (total_views, "Visualizacoes da pagina", None),
-            (total_clicks, "Clicaram no CTA", None),
-            (total_leads, "Leads enviados", None),
-            (resumo["assinantes_reais_ativos"], "Compraram (confirmado no Asaas)", None),
-        ],
-        nota=(
-            "Views/cliques/leads vem do Firestore (analytics_funnel_events), nao do contador local "
-            "do servidor do app (reseta a cada redeploy). Compras vem direto da API do Asaas."
-        ),
-    )
 
-    pct_confirmadas = (round(100 * resumo["assinantes_reais_ativos"] / resumo["total_cobrancas_aprovai"], 1)
-                        if resumo["total_cobrancas_aprovai"] else 0)
-    sec2 = kpi.Secao(
-        "Conversao e assinantes (Asaas)",
-        [
-            (pct_confirmadas / 100, "% Cobrancas confirmadas (das criadas)", {"type": "PERCENT", "pattern": "0.0%"}),
-            (resumo["assinantes_reais_ativos"], "Assinantes ativos reais (nao staff/teste)", None),
-            (resumo["mrr_real"], "MRR recorrente real", {"type": "CURRENCY", "pattern": "R$#,##0.00"}),
-            (resumo["cobrancas_teste_ou_staff_sucesso"], "Cobrancas 'sucesso' de teste/staff (fora da contagem)", None),
-        ],
-        nota=(
-            f"{resumo['total_cobrancas_aprovai']} cobrancas do AprovAI identificadas na Asaas no total "
-            "(conta compartilhada com Elaboracao/Assessoria, filtradas pelo mesmo criterio que o app usa). "
-            "Detalhe linha a linha (sem PII) em raw_asaas_aprovai."
-        ),
-        nota_aviso=True,
-    )
+def completar_elaboracao(leads):
+    """Etapas cumulativas do SDR de elaboracao (abriu so existe no e-mail)."""
+    for l in leads.values():
+        l["engajou"] = l["clicou"] or l["respondeu"] or l["cadastro"]
+        l["abriu"] = l["abriu"] or l["engajou"]
+    return leads
 
-    sec3 = kpi.Secao(
-        "Assinantes no app (Firestore) vs cobranca confirmada (Asaas) - divergencia a validar com o Thiago",
-        [
-            (pre_approvals["total_ativos_no_app"], "Marcados 'ativo' no app (payment_pre_approvals)", None),
-            (pre_approvals["migrados_kiwify_sem_billing_asaas"], "Migrados do Kiwify sem assinatura Asaas provisionada", None),
-            (pre_approvals["com_billing_asaas_real"], "Com data de inicio/expiracao real no Asaas", None),
-            (resumo["assinantes_reais_ativos"], "Confirmados por cobranca recebida no Asaas", None),
-        ],
-        nota=(
-            "O app marca 22 usuarios como assinante ativo, mas 18 vieram da migracao do Kiwify sem "
-            "'subscriptionExpiresAt'/'initialSubscriptionDate' preenchido - nunca tiveram assinatura "
-            "recorrente provisionada no Asaas, o que sugere artefato de migracao, nao cobranca real "
-            "em curso. So 4 tem data real, e mesmo esses nao aparecem confirmados na rodada do Asaas. "
-            "Numero de assinante/MRR confiavel depende de o Thiago validar qual lado esta certo."
-        ),
-        nota_aviso=True,
-    )
-    return [sec1, sec2, sec3]
+
+def funil_elaboracao(leads):
+    v = list(leads.values())
+    return [("Disparados", len(v)), ("Abriram", sum(l["abriu"] for l in v)),
+            ("Clicaram ou responderam", sum(l["engajou"] for l in v)),
+            ("Cadastro na plataforma", sum(l["cadastro"] for l in v))]
+
+
+def funil_app(funil_rows, resumo):
+    return [("Visitas a pagina", sum(r[1] for r in funil_rows)), ("Cliques no botao", sum(r[2] for r in funil_rows)),
+            ("Leads", sum(r[3] for r in funil_rows)), ("Assinantes pagantes", resumo["assinantes_reais_ativos"])]
+
+
+def cobrancas_por_situacao(asaas_rows):
+    cont = Counter(SITUACAO_COBRANCA.get(r[3], "Outras") for r in asaas_rows if not r[8])
+    return sorted(cont.items(), key=lambda x: -x[1])
+
+
+def visitas_por_dia(funil_rows, hoje, dias=30):
+    por = {r[0]: r for r in funil_rows}
+    out = []
+    for i in range(dias - 1, -1, -1):
+        d = hoje - datetime.timedelta(days=i)
+        r = por.get(d.isoformat())
+        out.append([d.strftime("%d/%m"), r[1] if r else 0, r[2] if r else 0])
+    return out
+
+
+def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora):
+    import sdr_automatize as sdra
+    hoje = agora.date()
+    app = funil_app(funil_rows, resumo)
+    p = dp.Painel("AprovAI", "AprovAI · do disparo de elaboracao ao assinante",
+                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + Firestore do app + Asaas")
+    elab = funil_elaboracao(leads_elab) if leads_elab is not None else None
+    p.linha(dp.Cartao("Leads de elaboracao disparados", elab[0][1] if elab else 0),
+            dp.Cartao("Visitas ao AprovAI", app[0][1]),
+            dp.Cartao("Leads no app", app[2][1]),
+            dp.Cartao("Assinantes pagantes", resumo["assinantes_reais_ativos"]))
+    funil_do_app = dp.Funil("Funil do app", app, altura=320,
+                            subtitulo="% sobre as visitas · sem ligacao com o disparo (link sem UTM)")
+    if elab:
+        p.linha(dp.Funil("SDR de elaboracao (Automatize)", elab, altura=320), funil_do_app)
+        ultimo = sdra.ultimo_disparo(envios_elab)
+        p.linha(dp.Serie("Disparos de elaboracao por semana", ["Semana", "E-mail", "WhatsApp"],
+                         sdra.por_semana(envios_elab, hoje, 10), empilhado=True,
+                         subtitulo=f"Ultimo disparo {ultimo.strftime('%d/%m') if ultimo else '-'}"),
+                dp.Serie("Visitas e cliques no app por dia", ["Dia", "Visitas", "Cliques"],
+                         visitas_por_dia(funil_rows, hoje), tipo="LINE", rotulos=False,
+                         subtitulo="Ultimos 30 dias"))
+    else:
+        p.linha(funil_do_app, dp.Serie("Visitas e cliques no app por dia", ["Dia", "Visitas", "Cliques"],
+                                       visitas_por_dia(funil_rows, hoje), tipo="LINE", rotulos=False))
+    p.linha(dp.Serie("Assinantes: app x Asaas", ["Fonte", "Pessoas"], [
+                ["Ativos no app", pre_approvals["total_ativos_no_app"]],
+                ["Com assinatura datada", pre_approvals["com_billing_asaas_real"]],
+                ["Pagando no Asaas", resumo["assinantes_reais_ativos"]]],
+                tipo="BAR", subtitulo=f"{pre_approvals['migrados_kiwify_sem_billing_asaas']} vieram do Kiwify sem cobranca"),
+            dp.Rosca("Cobrancas do AprovAI no Asaas", cobrancas_por_situacao(asaas_rows),
+                     subtitulo="Sem testes da equipe"))
+    if elab:
+        p.linha(dp.Tabela("SDR de elaboracao por semana de disparo",
+                          ["Semana", "Disparados", "Abriram", "Engajaram", "Cadastro", "Disparo > cadastro"],
+                          sdra.coorte(leads_elab, hoje, ["abriu", "engajou", "cadastro"]),
+                          formatos=[None] + [dp.FMT_INT] * 4 + [dp.FMT_PCT], gradiente=[5]))
+    resumo_kpi = {"aprovai_visitas": app[0][1], "aprovai_leads": app[2][1],
+                  "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],
+                  "aprovai_ativos_app": pre_approvals["total_ativos_no_app"]}
+    if elab:
+        resumo_kpi.update({"elaboracao_disparados": elab[0][1], "elaboracao_cadastros": elab[-1][1]})
+    return p, resumo_kpi
+
+
+def coletar_elaboracao():
+    """(leads, envios) do SDR de elaboracao, ou (None, None) se o banco nao responder."""
+    import sdr_automatize as sdra
+    try:
+        conn = sdra.conectar()
+        try:
+            envios = sdra.envios(conn, sdra.ELABORACAO)
+        finally:
+            conn.close()
+    except (Exception, SystemExit) as e:
+        print(f"[aprovai] SDR de elaboracao indisponivel: {str(e)[:160]}")
+        return None, None
+    return completar_elaboracao(sdra.por_lead(envios)), envios
 
 
 # ===================================================
@@ -323,37 +365,25 @@ def main():
     sync.pii_guard(tabs)
     print("pii_guard: OK (zero hits)")
 
-    secoes = montar_secoes(funil_rows, resumo, pre_approvals)
-    subtitulo = (f"Foto: {now.strftime('%d/%m/%Y %H:%M')} (Brasilia) - "
-                 "views/cliques/leads do Firestore (aprovai-de156); compras/assinantes/MRR da API do Asaas")
+    print("Puxando banco do SDR Brada (so elaboracao)...")
+    leads_elab, envios_elab = coletar_elaboracao()
+    painel, resumo_kpi = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now)
+    print("  resumo:", resumo_kpi)
 
     if args.dry_run:
         print("\n--dry-run: nada escrito na Sheet.")
         for nome, (header, rows) in tabs.items():
             print(f"  {nome}: {len(rows)} linhas")
-        for secao in secoes:
-            print(f"  [{secao.titulo}]", secao.metricas)
         return
 
     gc = sync.get_sheets_client()
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
-    raw_wss = {nome: sync.write_overwrite(sh, nome, header, rows) for nome, (header, rows) in tabs.items()}
-
-    svc = build_sheets_service()
-    dest_ws, n_rows = kpi.publish(sh, svc, sync.SPREADSHEET_ID, "AprovAI",
-                                  "AprovAI — Funil de conversao e assinantes (Asaas)", subtitulo, secoes)
-    dashboard_charts.publish_line_chart(
-        svc, sync.SPREADSHEET_ID, raw_wss["raw_funil_aprovai"], dest_ws, n_rows=len(funil_rows) + 1,
-        series_cols=[1, 2, 3], title="Visualizacoes, cliques e leads do funil por dia",
-        anchor_row=n_rows + 1)
-    print("AprovAI: aba, raws e grafico atualizados.")
-
-
-# Mora em sync.py (base de todo o projeto, sem risco de import circular);
-# alias mantido aqui porque os outros scripts (sync_comunidade.py,
-# sync_primeira_fila.py, sync_sdr_incentivador.py, sync_disparo_incentivador.py)
-# ja fazem `from sync_aprovai import build_sheets_service`.
-build_sheets_service = sync.build_sheets_service
+    for nome, (header, rows) in tabs.items():
+        sync.write_overwrite(sh, nome, header, rows)
+    svc = sync.build_sheets_service()
+    painel.publicar(sh, svc, sync.SPREADSHEET_ID)
+    dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo_kpi, now)
+    print("AprovAI: aba e raws atualizados.")
 
 
 if __name__ == "__main__":
