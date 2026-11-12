@@ -70,3 +70,13 @@ def test_divisao_por_semana_e_fila_da_visao_geral():
     linhas = ex.linhas_fila(envios, fila, D(2026, 11, 12), janela=28)
     assert linhas[1] == ["AprovAI", 0, 0, 239, "WhatsApp"] and linhas[2][1] == 2 / 28
     assert len(ex.componentes_visao_geral(envios, fila, D(2026, 11, 12))) == 2
+
+
+def test_fonte_do_banco_nao_injeta_formula():
+    import pytest
+    assert ex.literal("esporte-federal") == '"esporte-federal"'
+    with pytest.raises(ValueError):
+        ex.literal('x");IMPORTXML("http://y')
+    linhas = [[46329, "Incentivador", "E-mail", 'x");IMPORTXML("h', 9, 0, 0, 0, 0, 0],
+              [46329, "Incentivador", "E-mail", "salic", 1, 0, 0, 0, 0, 0]]
+    assert ex.fontes(linhas) == ["salic"]

@@ -12,6 +12,7 @@ atualizacao diaria e valem para todo mundo que abrir a planilha.
 """
 
 import datetime
+import re
 
 import dashboard_painel as dp
 import sdr_automatize as sdr
@@ -70,11 +71,29 @@ def base(envios):
     return [[serial(d), f, c, fo] + [acc[k] for k in COLUNA] for (d, f, c, fo), acc in sorted(soma.items())]
 
 
+SEGURO = re.compile(r"[\w .\-/()]{1,60}")
+
+
+def seguro(texto):
+    return bool(SEGURO.fullmatch(str(texto)))
+
+
+def literal(texto):
+    """Texto de fora (ex.: fonte do banco) dentro de formula: so caracteres simples, aspas escapadas."""
+    if not seguro(texto):
+        raise ValueError(f"valor fora do padrao para formula: {texto!r}")
+    return '"' + str(texto).replace('"', '""') + '"'
+
+
 def fontes(linhas):
+    """Fontes por volume; nome fora do padrao nao vira filtro nem linha (entraria no texto da formula)."""
     total = {}
     for l in linhas:
         total[l[3]] = total.get(l[3], 0) + l[4]
-    return sorted(total, key=lambda f: (-total[f], f))
+    fora = sorted(f for f in total if not seguro(f))
+    if fora:
+        print(f"[AVISO] fontes com nome fora do padrao ficaram fora do filtro: {len(fora)}")
+    return sorted((f for f in total if seguro(f)), key=lambda f: (-total[f], f))
 
 
 # ---------- formulas (planilha pt-BR: ';' entre argumentos) ----------
@@ -105,7 +124,7 @@ class Filtros:
             if valor is None:
                 crit = f'IF({self.r(chave)}="{todos}";"*";{self.r(chave)})'
             else:
-                crit = f'"{valor}"'
+                crit = literal(valor)
             partes += [_col(letra), crit]
         return partes
 
