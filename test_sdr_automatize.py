@@ -40,3 +40,29 @@ def test_coorte_conta_por_semana_do_primeiro_disparo():
              "c": {"dia": D(2026, 11, 3), "x": True}}
     linhas = sdra.coorte(leads, D(2026, 11, 12), ["x"], n=2)
     assert linhas == [["02/11", 1, 1, 1.0], ["09/11", 2, 1, 0.5]]
+
+
+class _Cursor:
+    def __init__(self, linhas):
+        self.linhas = linhas
+
+    def execute(self, *a):
+        pass
+
+    def fetchall(self):
+        return self.linhas
+
+
+class _Conn:
+    def __init__(self, linhas):
+        self.linhas = linhas
+
+    def cursor(self):
+        return _Cursor(self.linhas)
+
+
+def test_fila_do_dia_separa_enviados_e_espera_com_canal_mais_comum():
+    fila = sdra.fila_do_dia(_Conn([("elaboracao", "fila", "whatsapp", 230), ("elaboracao", "adiado", "email", 9),
+                                   ("incentivador", "enviado", "email", 8)]))
+    assert fila["elaboracao"] == {"enviados": 0, "na_fila": 239, "canal_fila": "whatsapp"}
+    assert fila["incentivador"] == {"enviados": 8, "na_fila": 0, "canal_fila": ""}

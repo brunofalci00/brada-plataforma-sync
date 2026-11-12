@@ -105,6 +105,51 @@ def por_dia(lista, hoje, n=30):
     return [[d.strftime("%d/%m"), c["email"], c["whatsapp"]] for d, c in cont.items()]
 
 
+CONSULTA_FRENTES = """
+    select modalidade, dia, canal, fonte_slug,
+           aberto_em is not null, clicou_em is not null, respondeu_em is not null,
+           (visitou_agenda_em is not null or clicou_agendar_em is not null),
+           card_hubspot_em is not null, cadastro_em is not null, bounce_em is not null
+    from dados.envios
+    where modalidade in (%s, %s, %s) and dia is not null
+      and coalesce(origem_evento, '') not like 'backfill%%'
+"""
+CAMPOS_FRENTES = ("modalidade", "dia", "canal", "fonte") + MARCAS
+
+# Plano do alocador no ultimo dia planejado: o que saiu e o que ficou esperando, por frente e canal.
+CONSULTA_FILA = """
+    select modalidade, status, canal, count(*)
+    from dados.plano_disparo
+    where dia = (select max(dia) from dados.plano_disparo)
+    group by 1, 2, 3
+"""
+
+
+def envios_frentes(conn):
+    """Envios das tres frentes, sem lead_id: modalidade, dia, canal, fonte e marcas de etapa."""
+    cur = conn.cursor()
+    cur.execute(CONSULTA_FRENTES, (INCENTIVADOR, ELABORACAO, APTOS))
+    return [dict(zip(CAMPOS_FRENTES, r)) for r in cur.fetchall()]
+
+
+def fila_do_dia(conn):
+    """{modalidade: {"enviados": n, "na_fila": n, "canal_fila": canal mais comum entre os que esperam}}."""
+    cur = conn.cursor()
+    cur.execute(CONSULTA_FILA)
+    out = {}
+    for modalidade, status, canal, n in cur.fetchall():
+        f = out.setdefault(modalidade, {"enviados": 0, "na_fila": 0, "_canais": {}})
+        if status == "enviado":
+            f["enviados"] += n
+        else:
+            f["na_fila"] += n
+            f["_canais"][canal or "?"] = f["_canais"].get(canal or "?", 0) + n
+    for f in out.values():
+        canais = f.pop("_canais")
+        f["canal_fila"] = max(canais, key=canais.get) if canais else ""
+    return out
+
+
 def ultimo_disparo(lista):
     dias = [e["dia"] for e in lista if e["dia"]]
     return max(dias) if dias else None

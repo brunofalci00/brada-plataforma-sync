@@ -113,3 +113,38 @@ def test_aba_mantem_colunas_a_ate_z():
     grade = next(r["updateSheetProperties"]["properties"]["gridProperties"] for r in reqs
                  if "updateSheetProperties" in r and r["updateSheetProperties"]["properties"]["sheetId"] == 1)
     assert grade["columnCount"] == 26
+
+
+def test_formula_do_codigo_vira_formula_e_texto_externo_nao():
+    assert dp._valor_dados(dp.Formula("=SUM(A1;A2)")) == {"userEnteredValue": {"formulaValue": "=SUM(A1;A2)"}}
+    assert dp._valor_dados("=IMPORTXML(1)") == {"userEnteredValue": {"stringValue": "=IMPORTXML(1)"}}
+    assert dp._valor_dados("") == {} and dp._valor_dados(3) == {"userEnteredValue": {"numberValue": 3}}
+    assert "formulaValue" in dp._cel(dp.Formula("=1"))["userEnteredValue"]
+
+
+def _controles():
+    return dp.Controles("Aba X", [dp.Campo("de", "De", 46000, data=True),
+                                  dp.Campo("frente", "Frente", "Todas", span=2, opcoes=["Todas", "Inc"]),
+                                  dp.Campo("ag", "Agrupar", "Dia", opcoes=["Dia", "Semana"])])
+
+
+def test_controles_tem_endereco_fixo_lista_e_calendario():
+    ctl = _controles()
+    assert ctl.ref("de") == "'Aba X'!$A$6" and ctl.ref("frente") == "'Aba X'!$B$6" and ctl.ref("ag") == "'Aba X'!$D$6"
+    reqs = _reqs(dp.Painel("Aba X", "t", "r").linha(ctl))
+    regras = [r["setDataValidation"]["rule"]["condition"]["type"] for r in reqs if "setDataValidation" in r]
+    assert regras == ["DATE_IS_VALID", "ONE_OF_LIST", "ONE_OF_LIST"]
+    limpeza = next(r for r in reqs if "updateCells" in r and "range" in r["updateCells"])
+    assert "dataValidation" in limpeza["updateCells"]["fields"]  # regra antiga de lugar que mudou some
+
+
+def test_controles_fora_da_primeira_linha_e_erro():
+    import pytest
+    with pytest.raises(ValueError):
+        _reqs(dp.Painel("Aba X", "t", "r").linha(dp.Cartao("a", 1)).linha(_controles()))
+
+
+def test_gradiente_vale_para_coluna_de_formula():
+    t = dp.Tabela("T", ["S", "Taxa"], [["a", dp.Formula("=1")], ["b", dp.Formula("=2")]],
+                  formatos=[None, dp.FMT_PCT], gradiente=[1])
+    assert sum("addConditionalFormatRule" in r for r in _reqs(dp.Painel("X", "t", "r").linha(t))) == 1
