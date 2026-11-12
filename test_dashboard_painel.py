@@ -106,3 +106,10 @@ def test_texto_que_comeca_com_igual_nao_vira_formula():
     celulas = [c for r in _reqs(dp.Painel("X", "t", "r").linha(t)) if "updateCells" in r and "rows" in r["updateCells"]
                for linha in r["updateCells"]["rows"] for c in linha["values"] if c.get("userEnteredValue")]
     assert not any("formulaValue" in c["userEnteredValue"] for c in celulas)
+
+
+def test_aba_mantem_colunas_a_ate_z():
+    reqs = _reqs(dp.Painel("X", "t", "r").linha(dp.Cartao("a", 1)))
+    grade = next(r["updateSheetProperties"]["properties"]["gridProperties"] for r in reqs
+                 if "updateSheetProperties" in r and r["updateSheetProperties"]["properties"]["sheetId"] == 1)
+    assert grade["columnCount"] == 26
