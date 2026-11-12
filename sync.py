@@ -1061,10 +1061,9 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
             add("leads_automatize_total", estagio, n)
     return snap
 
-# (metrica, segmento, rotulo da coluna). Achado do audit de 11/11: zero
-# grafico nativo em qualquer aba; estas 3 series ja tem historico real em
-# `snap_diario` (ou comecam a ter, no caso dos leads) e viram grafico de linha
-# na aba Plataforma Brada via dashboard_charts.py.
+# (metrica, segmento, rotulo da coluna). Series do `snap_diario` em formato largo:
+# alimentam o grafico de tendencia e a comparacao de 30 dias da aba Plataforma Brada
+# (painel_plataforma.py).
 SERIES_TENDENCIA = [
     ("projects_por_estoque", "apto", "aptos_a_captar"),
     ("users_ativos_30d", "(todos)", "users_ativos_30d"),
@@ -1503,12 +1502,11 @@ COLUNAS_ISENTAS_DIGITOS = {"user_hash", "project_hash", "owner_hash",
                            "utm_term", "lead_id",
                            # Sprint 3 (sync_aprovai.py): identificadores ja hasheados.
                            "payment_id_hash", "customer_id_hash",
-                           # Sprint 3 (sync_sdr_incentivador.py): deal_id do HubSpot tem 11
-                           # digitos, e id de registro de CRM (empresa/negocio), nao PII de
-                           # pessoa fisica — isencao ja prevista neste comentario antes de existir.
+                           # hubspot_incentivador.py: deal_id do HubSpot tem 11 digitos, e id
+                           # de registro de CRM (empresa/negocio), nao PII de pessoa fisica.
                            "deal_id", "owner_id",
-                           # 11/11 (sync_disparo_incentivador.py): mesmo sha256[:12] hex dos
-                           # outros *_hash, falso positivo possivel por construcao.
+                           # sync_incentivador.py: mesmo sha256[:12] hex dos outros *_hash,
+                           # falso positivo possivel por construcao.
                            "lead_id_hash"}  # utm_term/lead_id: id controlado, nao-PII
 
 
@@ -1632,7 +1630,7 @@ def read_existing(sh, name, required=()):
 def coletar_ga_plataforma():
     """GA da Plataforma (match.brada.social, propriedade 537748462). Falha ou
     credencial ausente nao derruba o resto do sync: devolve None, e a aba
-    mostra o aviso padrao (ver dashboard_analytics._secao_ga)."""
+    sai sem o bloco de visitas."""
     try:
         creds = ga_analytics.credenciais(COMUNIDADE_SA_JSON, COMUNIDADE_SA_FILE, "COMUNIDADE_ACCESS_TOKEN")
     except SystemExit as erro:
@@ -1850,29 +1848,15 @@ def main():
     if leads_rows is not None:
         write_overwrite(sh, "raw_leads_automatize", HEADER_LEADS_AUTOMATIZE, leads_rows)
     tendencia_header, tendencia_rows = build_tendencia_diaria(snap_historico)
-    tendencia_ws = write_overwrite(sh, "raw_tendencia_diaria", tendencia_header, tendencia_rows)
-    # Dashboard POR ULTIMO: o carimbo de atualizacao so avanca se tudo acima passou
-    import dashboard_analytics
-    import dashboard_layout
-    status_layout = dashboard_layout.ensure_dashboard(sh, metrics, now_brt.replace(tzinfo=None))
+    write_overwrite(sh, "raw_tendencia_diaria", tendencia_header, tendencia_rows)
+    # Painel POR ULTIMO: o carimbo de atualizacao so avanca se tudo acima passou
+    import painel_plataforma
+    resumo = painel_plataforma.publicar(
+        sh, build_sheets_service(), SPREADSHEET_ID, metrics,
+        analytics.records(HEADER_USERS, users_rows), analytics.records(HEADER_PROJECTS, projects_rows),
+        tendencia_rows, now_brt)
     write_overwrite(sh, "meta_sync", HEADER_META, meta_rows)
-    print(f"  Dashboard: valores atualizados | {status_layout}")
-
-    import dashboard_charts
-    plataforma_ws = sh.worksheet(dashboard_analytics.TAB_TITLE)
-    # Grafico combina so "aptos_a_captar" e "users_ativos_30d": escala parecida
-    # (dezenas/centenas), cabe num eixo so. "leads_automatize_total" fica de
-    # fora - comecou a serie em 11/11, so teria 1-2 pontos, e a escala (dezenas
-    # de milhares) exigiria eixo direito so pra isso. Fica so como card ate
-    # acumular semanas de historico real (achado do Bruno 12/11: 3 series
-    # junto ficava confuso demais pra ler). Janela de 60 dias: sem isso o eixo
-    # X vira ilegivel com 150+ rotulos de data se sobrepondo.
-    dashboard_charts.publish_line_chart(
-        build_sheets_service(), SPREADSHEET_ID, tendencia_ws, plataforma_ws,
-        n_rows=len(tendencia_rows) + 1, series_cols=[1, 2],
-        title="Aptos a captar e usuarios ativos por dia (ultimos 60 dias)", anchor_row=125,
-        window_rows=60)
-    print("  Tendencia: grafico atualizado")
+    print(f"  Plataforma Brada: painel publicado | {resumo}")
     print(f"plataforma_sync: OK | users={len(users_rows)} projects={len(projects_rows)} "
           f"proposals={len(proposals_rows)} | {round(time.time() - t0, 1)}s")
 

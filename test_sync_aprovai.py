@@ -86,3 +86,47 @@ def test_resumo_pre_approvals_separa_migrado_sem_billing_de_billing_real():
 def test_resumo_pre_approvals_vazio_nao_quebra():
     resumo = resumo_pre_approvals([])
     assert resumo == {"total_ativos_no_app": 0, "migrados_kiwify_sem_billing_asaas": 0, "com_billing_asaas_real": 0}
+
+
+def _envio_elab(lead, **marcas):
+    import datetime
+    import sdr_automatize as sdra
+    e = {"lead_id": lead, "dia": datetime.date(2026, 10, 1), "canal": "email"}
+    e.update({m: marcas.get(m, False) for m in sdra.MARCAS})
+    return e
+
+
+def test_funil_de_elaboracao_e_cumulativo():
+    import sdr_automatize as sdra
+    from sync_aprovai import completar_elaboracao, funil_elaboracao
+    leads = completar_elaboracao(sdra.por_lead([
+        _envio_elab("a"), _envio_elab("b", abriu=True), _envio_elab("c", respondeu=True),
+        _envio_elab("d", cadastro=True)]))
+    assert funil_elaboracao(leads) == [("Disparados", 4), ("Abriram", 3), ("Clicaram ou responderam", 2),
+                                       ("Cadastro na plataforma", 1)]
+
+
+def test_cobrancas_por_situacao_ignora_teste_e_agrupa_status():
+    from sync_aprovai import cobrancas_por_situacao
+    linha = lambda status, teste=False: ["t", "p", "c", status, 89, "PIX", "", "", teste]  # noqa: E731
+    rows = [linha("RECEIVED"), linha("CONFIRMED"), linha("REFUNDED"), linha("RECEIVED", teste=True)]
+    assert cobrancas_por_situacao(rows) == [("Pagas", 2), ("Estornadas", 1)]
+
+
+def test_visitas_por_dia_completa_dias_vazios():
+    import datetime
+    from sync_aprovai import visitas_por_dia
+    funil = [["2026-11-11", 7, 1, 0, "fonte"]]
+    assert visitas_por_dia(funil, datetime.date(2026, 11, 12), dias=2) == [["11/11", 7, 1], ["12/11", 0, 0]]
+
+
+def test_painel_sem_banco_do_sdr_fica_so_com_o_app():
+    import datetime
+    from sync_aprovai import montar_painel
+    resumo = {"assinantes_reais_ativos": 0, "mrr_real": 0}
+    pre = {"total_ativos_no_app": 22, "migrados_kiwify_sem_billing_asaas": 17, "com_billing_asaas_real": 5}
+    painel, kpis = montar_painel([["2026-11-11", 7, 1, 1, "f"]], resumo, pre, [], None, None,
+                                 datetime.datetime(2026, 11, 12, 9))
+    titulos = [c.titulo for linha in painel.linhas for c in linha]
+    assert "SDR de elaboracao (Automatize)" not in titulos and "Funil do app" in titulos
+    assert "elaboracao_disparados" not in kpis and kpis["aprovai_visitas"] == 7

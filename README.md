@@ -12,7 +12,7 @@ Padrao espelha `brada-hubspot-sync` e `brada-clickup-sync`. Documentacao complet
 | `raw_projects` | overwrite | 1 linha/projeto: status, expiracao CAC (vigente/expirado/sem_data), budget, ODS/UF |
 | `raw_proposals` | overwrite | 1 linha/proposta: status, edital, valor aprovado (R$), datas |
 | `snap_diario` | append idempotente | serie historica em formato longo (data, metrica, segmento, valor) |
-| `raw_tendencia_diaria` | overwrite | pivot de `snap_diario` (aptos a captar, usuarios ativos, leads reais) ja em formato largo, so pra alimentar o grafico de linha nativo da aba Plataforma Brada |
+| `raw_tendencia_diaria` | overwrite | pivot de `snap_diario` (aptos a captar, usuarios ativos, leads reais) em formato largo: tendencia e comparacao de 30 dias da aba Plataforma Brada |
 | `meta_sync` | overwrite | ultima execucao, contagens, avisos de schema drift |
 
 Sprint 2 adiciona `raw_funil_automatize` (HubSpot `trabalhado_por=Automatize`) + motor de atribuicao 3 camadas.
@@ -21,9 +21,13 @@ Sprint 2 adiciona `raw_funil_automatize` (HubSpot `trabalhado_por=Automatize`) +
 
 | Script | Aba(s) | Fonte | Cron |
 |---|---|---|---|
-| `sync_aprovai.py` | `AprovAI`, `raw_asaas_aprovai`, `raw_funil_aprovai` | Asaas (cobrancas filtradas por `is_aprovai_transaction`, porta exata da regra do app `iasmartsites/aprovai2`) + Firestore do projeto `aprovai-de156` (`analytics_funnel_events`) | Junto do `sync.py`, mesmo workflow |
-| `sync_sdr_incentivador.py` | `SDR Incentivador`, `raw_hubspot_incentivador` | HubSpot, pipeline Incentivador (`default`): cards por `trabalhado_por`, quem chega em `[EV] Reuniao Agendada` ou alem e por qual caminho (automatico vs manual) | Junto do `sync.py`, mesmo workflow |
-| `sync_disparo_incentivador.py` | `Disparo Incentivador`, `raw_disparo_incentivador` | Banco Postgres do SDR Brada (Automatize, so leitura, schema `dados`): funil da Brenda (envio -> abertura -> clique -> resposta -> agenda -> card no HubSpot) + estagio ATUAL de cada card, consultado ao vivo no HubSpot (o estagio salvo no banco da Automatize e so o de quando o card foi criado) | Junto do `sync.py`, mesmo workflow |
+| `sync_aprovai.py` | `AprovAI`, `raw_asaas_aprovai`, `raw_funil_aprovai` | Asaas (cobrancas filtradas por `is_aprovai_transaction`, porta exata da regra do app `iasmartsites/aprovai2`) + Firestore do projeto `aprovai-de156` (`analytics_funnel_events`) + banco do SDR Brada (`modalidade = elaboracao`) | Junto do `sync.py`, mesmo workflow |
+| `sync_incentivador.py` | `Incentivador`, `raw_disparo_incentivador`, `raw_hubspot_incentivador` | Banco do SDR Brada (`modalidade = incentivador`): funil por lead, do disparo da Brenda ao card no HubSpot + estagio ATUAL do card ao vivo no HubSpot (`hubspot_incentivador.py`) + pipeline Incentivador inteiro (Automatize x Executivos) | Junto do `sync.py`, mesmo workflow |
+
+Os tres canais do SDR Brada (Automatize) saem do mesmo banco e da mesma leitura,
+`sdr_automatize.py`: `modalidade` separa `incentivador`, `elaboracao` e
+`aprovado_selfservice` (aptos, funil na aba Plataforma Brada); linhas `backfill-*` ficam fora.
+Cada etapa do funil conta o lead que chegou PELO MENOS ate ela, entao o funil nunca sobe.
 
 PII do Asaas (nome/e-mail/CPF do cliente) e usada SO em memoria pra classificar
 teste-ou-staff; nunca vira coluna. Identificador publicado e `sync.hash_id`
@@ -33,8 +37,7 @@ nao entram nessa regra (registro de negocio B2B, nao pessoa fisica).
 Rodar local:
 ```
 python sync_aprovai.py --dry-run
-python sync_sdr_incentivador.py --dry-run
-python sync_disparo_incentivador.py --dry-run
+python sync_incentivador.py --dry-run
 ```
 Secrets adicionais: `ASAAS_APROVAI_API_KEY` (local: `~/.brada-secrets/asaas-aprovai.env`),
 `COMUNIDADE_SA_JSON` (local: `~/.brada-secrets/comunidade-dashboard-sa.json` - conta dashboard-leitura,
@@ -44,29 +47,25 @@ e mais usada desde 11/11),
 `AUTOMATIZE_SDR_DB_HOST/PORT/NAME/USER/PASSWORD` (local: `~/.brada-secrets/automatize-sdr-brada.env`,
 banco so leitura liberado pelo Jean/Automatize em 11/11).
 
-## Graficos nativos (`dashboard_charts.py`)
+## Painel (`dashboard_painel.py`)
 
-Achado do audit de dados de 11/11: nenhuma aba usava grafico nativo do Sheets, so card de numero.
-`dashboard_charts.publish_line_chart()` desenha um grafico de linha (`addChart`) a partir de uma
-aba `raw_*_diario` ja em formato largo (1a coluna = dia, demais = series numericas), reaproveitado
-por `sync_comunidade.py`, `sync_primeira_fila.py`, `sync_aprovai.py` (funil) e `sync.py` (pivot de
-`snap_diario`). Idempotente: apaga o(s) chart(s) existente(s) na aba de destino antes de redesenhar,
-e redimensiona a aba se faltar linha pra caber a altura inteira do grafico (senao o Sheets clampa e
-sobrepoe conteudo). Valor que volta de `read_existing` (historico) chega como string; quem monta a
-serie precisa converter pra numero de verdade, senao o Sheets descarta a serie inteira do grafico
-sem avisar (`sync.build_tendencia_diaria`/`_numero_ou_vazio` cobre isso pro pivot da Plataforma).
-`SDR Incentivador` e `Disparo Incentivador` ainda nao tem grafico: nenhum dos dois guarda historico
-diario hoje, so foto atual (`write_overwrite`).
+Toda aba do dashboard e um painel: grade de 12 colunas x 100px, cabecalho de uma linha e
+componentes que dividem a largura da linha (`Cartao` nativo com comparacao opcional, `Funil` em
+barra com "valor · % do topo", `Serie` em coluna/barra/linha/empilhada, `Rosca`, `Tabela` com
+faixas, borda e gradiente). Os numeros dos graficos vao para uma aba escondida `dados_<aba>`; cada
+sync grava seus KPIs em `dados_resumo` (escondida), que a `Visão Geral` le. Tudo e apagado e
+redesenhado a cada rodada. Regra do Bruno (12/11): funil de ponta a ponta com % de conversao,
+graficos variados, texto quase zero.
 
-## Legibilidade do `dashboard_kpi_blocks.py` (achado do Bruno 12/11)
-
-Rotulo de metrica e nota de secao cortavam no meio da frase em TODAS as abas deste modulo (Visão
-Geral, Comunidade, AprovAI, SDR Incentivador, Disparo Incentivador, Primeira Fila - so a Plataforma
-Brada, com layout proprio em `dashboard_analytics.py`, nao tinha o problema). Causa: nenhuma celula
-desse modulo setava `wrapStrategy: WRAP` - aumentar a altura da linha sozinho (o que a 1a tentativa
-de correcao fez) nao adianta nada se o texto nunca quebra de linha. Corrigido: `_cell(..., wrap=True)`
-em rotulo/nota/subtitulo/titulo de secao, mais altura de linha generosa (`ALTURA_ROTULO`/`ALTURA_NOTA`)
-e coluna mais larga (115px, era o default 100px do Sheets). Revalidado nas 6 abas apos a correcao.
+Pegadinhas do Sheets que so aparecem na planilha (nunca no dry-run), todas cobertas e com teste em
+`test_dashboard_painel.py`:
+- serie com texto e numero misturados some do grafico sem erro;
+- grafico sobe e cobre conteudo se a aba nao tem linhas abaixo da ancora;
+- cartao nativo com a base em celula VIZINHA do valor funde os dois intervalos e mostra a soma;
+- gradiente em coluna constante pinta tudo da cor maxima;
+- rotulo da maior barra corta na borda sem folga no eixo;
+- `pieChart` nao aceita cor por fatia: a paleta vem do tema da planilha (laranja, definido em 12/11);
+- formula em planilha pt-BR usa `;` e `\` dentro de chaves.
 
 ## PII (inegociavel)
 

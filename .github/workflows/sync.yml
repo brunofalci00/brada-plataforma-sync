@@ -23,7 +23,7 @@ jobs:
         run: pip install -r requirements.txt pytest
 
       - name: Validar contrato de analytics
-        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_sync_sdr_incentivador.py test_sync_disparo_incentivador.py test_sync_primeira_fila.py test_sync_comunidade.py test_sync_visao_geral.py
+        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_dashboard_painel.py test_sdr_automatize.py test_sync_incentivador.py test_painel_plataforma.py test_sync_primeira_fila.py test_sync_comunidade.py test_sync_visao_geral.py
 
       - name: Sync Plataforma -> Sheets
         env:
@@ -32,9 +32,16 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           AUTOMATIZE_ENDPOINT_TOKEN: ${{ secrets.AUTOMATIZE_ENDPOINT_TOKEN }}
           # Mesma conta dashboard-leitura da aba Comunidade: le o GA da Plataforma
-          # (537748462, match.brada.social). Ausente = secao de GA da aba Plataforma
-          # Brada sai com aviso, sem derrubar o resto do sync.
+          # (537748462, match.brada.social). Ausente = aba Plataforma Brada sai sem o
+          # bloco de visitas, sem derrubar o resto do sync.
           COMUNIDADE_SA_JSON: ${{ secrets.COMUNIDADE_SA_JSON }}
+          # Banco do SDR Brada (Automatize, so leitura): funil do SDR de aptos. Ausente =
+          # a aba sai sem esse funil.
+          AUTOMATIZE_SDR_DB_HOST: ${{ secrets.AUTOMATIZE_SDR_DB_HOST }}
+          AUTOMATIZE_SDR_DB_PORT: ${{ secrets.AUTOMATIZE_SDR_DB_PORT }}
+          AUTOMATIZE_SDR_DB_NAME: ${{ secrets.AUTOMATIZE_SDR_DB_NAME }}
+          AUTOMATIZE_SDR_DB_USER: ${{ secrets.AUTOMATIZE_SDR_DB_USER }}
+          AUTOMATIZE_SDR_DB_PASSWORD: ${{ secrets.AUTOMATIZE_SDR_DB_PASSWORD }}
         run: python sync.py
 
       # Mesma Sheet (aba AprovAI + raw_asaas_aprovai + raw_funil_aprovai), fonte
@@ -51,21 +58,17 @@ jobs:
           ASAAS_APROVAI_API_KEY: ${{ secrets.ASAAS_APROVAI_API_KEY }}
           ASAAS_APROVAI_ENVIRONMENT: production
           COMUNIDADE_SA_JSON: ${{ secrets.COMUNIDADE_SA_JSON }}
+          # Funil do SDR de elaboracao (banco do SDR Brada). Ausente = aba sai sem ele.
+          AUTOMATIZE_SDR_DB_HOST: ${{ secrets.AUTOMATIZE_SDR_DB_HOST }}
+          AUTOMATIZE_SDR_DB_PORT: ${{ secrets.AUTOMATIZE_SDR_DB_PORT }}
+          AUTOMATIZE_SDR_DB_NAME: ${{ secrets.AUTOMATIZE_SDR_DB_NAME }}
+          AUTOMATIZE_SDR_DB_USER: ${{ secrets.AUTOMATIZE_SDR_DB_USER }}
+          AUTOMATIZE_SDR_DB_PASSWORD: ${{ secrets.AUTOMATIZE_SDR_DB_PASSWORD }}
         run: python sync_aprovai.py
 
-      # Sprint 2 destravado: aba SDR Incentivador + raw_hubspot_incentivador,
-      # cards do pipeline Incentivador por trabalhado_por (Automatize x Executivo).
-      - name: Sync SDR Incentivador -> Sheets
-        if: always()
-        env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
-        run: python sync_sdr_incentivador.py
-
-      # Aba Disparo Incentivador: banco do SDR Brada (Automatize, so leitura) + HubSpot
-      # ao vivo, pra saber onde cada card criado pela Brenda esta agora.
-      - name: Sync Disparo Incentivador -> Sheets
+      # Aba Incentivador (junta as antigas SDR Incentivador e Disparo Incentivador):
+      # banco do SDR Brada (so incentivador) + HubSpot ao vivo, do disparo a reuniao.
+      - name: Sync Incentivador -> Sheets
         if: always()
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
@@ -78,10 +81,10 @@ jobs:
           AUTOMATIZE_SDR_DB_PASSWORD: ${{ secrets.AUTOMATIZE_SDR_DB_PASSWORD }}
         run: |
           if [ -z "$AUTOMATIZE_SDR_DB_HOST" ]; then
-            echo "::warning::AUTOMATIZE_SDR_DB_HOST ausente: aba Disparo Incentivador nao atualizada."
+            echo "::warning::AUTOMATIZE_SDR_DB_HOST ausente: aba Incentivador nao atualizada."
             exit 0
           fi
-          python sync_disparo_incentivador.py
+          python sync_incentivador.py
 
       # Aba Primeira Fila: banco da Automatize, usuario so leitura (esquema dados).
       - name: Sync Primeira Fila -> Sheets
@@ -108,7 +111,7 @@ jobs:
           fi
           python sync_comunidade.py
 
-      # Aba Visao Geral: le as abas acima (nao consulta fonte) e conta a historia em 5 capitulos. Sempre por ultimo.
+      # Aba Visao Geral: le o resumo que os passos acima gravaram (dados_resumo). Sempre por ultimo.
       - name: Visao Geral -> Sheets
         if: always()
         env:
