@@ -58,6 +58,16 @@ sem avisar (`sync.build_tendencia_diaria`/`_numero_ou_vazio` cobre isso pro pivo
 `SDR Incentivador` e `Disparo Incentivador` ainda nao tem grafico: nenhum dos dois guarda historico
 diario hoje, so foto atual (`write_overwrite`).
 
+## Legibilidade do `dashboard_kpi_blocks.py` (achado do Bruno 12/11)
+
+Rotulo de metrica e nota de secao cortavam no meio da frase em TODAS as abas deste modulo (Visão
+Geral, Comunidade, AprovAI, SDR Incentivador, Disparo Incentivador, Primeira Fila - so a Plataforma
+Brada, com layout proprio em `dashboard_analytics.py`, nao tinha o problema). Causa: nenhuma celula
+desse modulo setava `wrapStrategy: WRAP` - aumentar a altura da linha sozinho (o que a 1a tentativa
+de correcao fez) nao adianta nada se o texto nunca quebra de linha. Corrigido: `_cell(..., wrap=True)`
+em rotulo/nota/subtitulo/titulo de secao, mais altura de linha generosa (`ALTURA_ROTULO`/`ALTURA_NOTA`)
+e coluna mais larga (115px, era o default 100px do Sheets). Revalidado nas 6 abas apos a correcao.
+
 ## PII (inegociavel)
 
 - Serializacao whitelist; `email/name/phone/document/uid` NUNCA saem pra Sheet nem pra log.

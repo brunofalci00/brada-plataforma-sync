@@ -138,7 +138,7 @@ def model(m, now):
     text(118, "Páginas mais vistas (Google Analytics)", "header")
     top = ((ga["top"] if ga else []) + [(None, "")] * ga_analytics.TOP_PAGINAS)[:ga_analytics.TOP_PAGINAS]
     table(119, [(nome or "Sem dados no período", vistas) for vistas, nome in top])
-    text(125, "Tendência (gráfico nativo) · Aptos a captar, usuários ativos e leads reais por dia", "header")
+    text(125, "Tendência (gráfico nativo) · Aptos a captar e usuários ativos, últimos 60 dias", "header")
     return cells, blocks
 
 
