@@ -18,7 +18,7 @@ WARNING_BG = {"red": 1, "green": 0.9490196, "blue": 0.8666667}
 N_COLS = 8  # A..H, 4 metricas de 2 colunas cada
 
 
-def _cell(value=None, bg=None, bold=None, font_size=None, fg=None, number_format=None):
+def _cell(value=None, bg=None, bold=None, font_size=None, fg=None, number_format=None, wrap=False):
     ued = {}
     if value is not None:
         if isinstance(value, bool):
@@ -41,6 +41,12 @@ def _cell(value=None, bg=None, bold=None, font_size=None, fg=None, number_format
         fmt["textFormat"] = tf
     if number_format is not None:
         fmt["numberFormat"] = number_format
+    # Sem isso, texto mais longo que a celula (mesmo mesclada) so CORTA na
+    # borda direita - o default do Sheets nao e WRAP. Achado do Bruno 12/11:
+    # rotulo/nota ficavam cortados no meio da frase, mesmo com a linha mais
+    # alta (altura sem WRAP nao ajuda nada, o texto nunca quebra de linha).
+    if wrap:
+        fmt["wrapStrategy"] = "WRAP"
     if fmt:
         ued["userEnteredFormat"] = fmt
     return ued
@@ -68,6 +74,19 @@ class Secao:
         self.nota_aviso = nota_aviso
 
 
+# Achado do Bruno 12/11 ("deve ter outra coisa confusa tambem"): rotulo e nota
+# usam wrapStrategy WRAP, mas a linha fica na altura padrao do Sheets (21px) -
+# toda vez que o texto precisa de 2+ linhas pra caber, a 2a linha fica
+# ESCONDIDA (a celula tem o texto, so nao mostra, e o Sheets nao redimensiona
+# sozinho uma escrita feita via API). So acontecia nas abas deste modulo:
+# dashboard_analytics.py (Plataforma Brada) ja fixava altura maior pra esses
+# mesmos tipos de linha, e nao tinha o problema.
+ALTURA_ROTULO = 34   # 2 colunas mescladas (~230px): ate 2 linhas
+ALTURA_NOTA = 54      # largura inteira (~920px): ate 3 linhas
+ALTURA_SUBTITULO = 34  # largura inteira: ate 2 linhas
+LARGURA_COLUNA = 115   # default do Sheets (100px) cortava rotulo cedo demais
+
+
 def montar_requests(sheet_id, titulo_pagina, subtitulo, secoes):
     """Monta a lista de requests de batchUpdate para desenhar a aba inteira.
 
@@ -78,17 +97,20 @@ def montar_requests(sheet_id, titulo_pagina, subtitulo, secoes):
                                   "fields": "userEnteredValue,userEnteredFormat"}}]
     rows = []
     merges = []  # (r0, r1, c0, c1) 0-indexed, relativo ao topo da aba
+    linhas_altas = []  # (rowIndex, altura) - rotulo/nota/subtitulo, texto que pode quebrar linha
 
     rows.append(_row([_cell(titulo_pagina, bg=ORANGE, bold=True, font_size=16, fg=WHITE)] + [{}] * 7))
-    rows.append(_row([_cell(subtitulo, font_size=11, fg=GRAY)] + [{}] * 7))
+    rows.append(_row([_cell(subtitulo, font_size=11, fg=GRAY, wrap=True)] + [{}] * 7))
     merges.append((0, 1, 0, 8))
     merges.append((1, 2, 0, 8))
+    linhas_altas.append((1, ALTURA_SUBTITULO))
     rows.append(_row([{}] * 8))
     r = 3
 
     for secao in secoes:
-        rows.append(_row([_cell(secao.titulo, bold=True, font_size=12, fg=ORANGE)] + [{}] * 7))
+        rows.append(_row([_cell(secao.titulo, bold=True, font_size=12, fg=ORANGE, wrap=True)] + [{}] * 7))
         merges.append((r, r + 1, 0, 8))
+        linhas_altas.append((r, ALTURA_ROTULO))  # titulo de secao tambem pode ser longo (ex.: nota de divergencia)
         r += 1
 
         val_row, lab_row = [], []
@@ -97,7 +119,7 @@ def montar_requests(sheet_id, titulo_pagina, subtitulo, secoes):
             val_row.append(_cell(valor, bg=VALUE_BG, bold=True, font_size=20, fg=ORANGE,
                                   number_format=nf or {"type": "NUMBER", "pattern": "#,##0"}))
             val_row.append({})
-            lab_row.append(_cell(rotulo, bg=VALUE_BG, font_size=11, fg=GRAY))
+            lab_row.append(_cell(rotulo, bg=VALUE_BG, font_size=11, fg=GRAY, wrap=True))
             lab_row.append({})
         rows.append(_row(val_row))
         rows.append(_row([{"userEnteredFormat": {"backgroundColor": VALUE_BG}}] * 8))
@@ -106,12 +128,14 @@ def montar_requests(sheet_id, titulo_pagina, subtitulo, secoes):
             c0 = i * 2
             merges.append((r, r + 2, c0, c0 + 2))     # valor, 2 linhas
             merges.append((r + 2, r + 3, c0, c0 + 2))  # rotulo, 1 linha
+        linhas_altas.append((r + 2, ALTURA_ROTULO))
         r += 3
 
         if secao.nota:
             bg = WARNING_BG if secao.nota_aviso else None
-            rows.append(_row([_cell(secao.nota, bg=bg, font_size=11, fg=GRAY)] + [{}] * 7))
+            rows.append(_row([_cell(secao.nota, bg=bg, font_size=11, fg=GRAY, wrap=True)] + [{}] * 7))
             merges.append((r, r + 1, 0, 8))
+            linhas_altas.append((r, ALTURA_NOTA))
             r += 1
 
         rows.append(_row([{}] * 8))
@@ -123,6 +147,15 @@ def montar_requests(sheet_id, titulo_pagina, subtitulo, secoes):
     }})
     for r0, r1, c0, c1 in merges:
         _merge(requests, sheet_id, r0, r1, c0, c1)
+    for row_index, altura in linhas_altas:
+        requests.append({"updateDimensionProperties": {
+            "range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": row_index, "endIndex": row_index + 1},
+            "properties": {"pixelSize": altura}, "fields": "pixelSize",
+        }})
+    requests.append({"updateDimensionProperties": {
+        "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": N_COLS},
+        "properties": {"pixelSize": LARGURA_COLUNA}, "fields": "pixelSize",
+    }})
     requests.append({"updateSheetProperties": {
         "properties": {"sheetId": sheet_id, "gridProperties": {"hideGridlines": True}},
         "fields": "gridProperties.hideGridlines",

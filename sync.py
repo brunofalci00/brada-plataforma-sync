@@ -1860,11 +1860,18 @@ def main():
 
     import dashboard_charts
     plataforma_ws = sh.worksheet(dashboard_analytics.TAB_TITLE)
+    # Grafico combina so "aptos_a_captar" e "users_ativos_30d": escala parecida
+    # (dezenas/centenas), cabe num eixo so. "leads_automatize_total" fica de
+    # fora - comecou a serie em 11/11, so teria 1-2 pontos, e a escala (dezenas
+    # de milhares) exigiria eixo direito so pra isso. Fica so como card ate
+    # acumular semanas de historico real (achado do Bruno 12/11: 3 series
+    # junto ficava confuso demais pra ler). Janela de 60 dias: sem isso o eixo
+    # X vira ilegivel com 150+ rotulos de data se sobrepondo.
     dashboard_charts.publish_line_chart(
         build_sheets_service(), SPREADSHEET_ID, tendencia_ws, plataforma_ws,
-        n_rows=len(tendencia_rows) + 1, series_cols=[1, 2, 3],
-        title="Aptos a captar, usuarios ativos e leads reais por dia", anchor_row=125,
-        right_axis_cols=[3])  # leads_automatize_total e ~100x maior; achataria as outras 2 no eixo esquerdo
+        n_rows=len(tendencia_rows) + 1, series_cols=[1, 2],
+        title="Aptos a captar e usuarios ativos por dia (ultimos 60 dias)", anchor_row=125,
+        window_rows=60)
     print("  Tendencia: grafico atualizado")
     print(f"plataforma_sync: OK | users={len(users_rows)} projects={len(projects_rows)} "
           f"proposals={len(proposals_rows)} | {round(time.time() - t0, 1)}s")
