@@ -88,6 +88,20 @@ def test_missing_approved_value_is_not_zero():
     assert a.valor_aprovado([]) == 0
 
 
+def test_build_snapshot_sem_leads_automatize_nao_quebra():
+    assert sync.build_snapshot([], [], [], "2026-11-11") == sync.build_snapshot(
+        [], [], [], "2026-11-11", leads_automatize=None)
+
+
+def test_build_snapshot_leads_automatize_total_real_e_por_estagio():
+    snap = sync.build_snapshot([], [], [], "2026-11-11",
+                                leads_automatize={"total": 53183, "por_estagio": {"novo": 44351, "arquivado": 439}})
+    linhas = [r for r in snap if r[1] == "leads_automatize_total"]
+    assert ("2026-11-11", "leads_automatize_total", "(todos)", 53183) in [tuple(r) for r in linhas]
+    assert ("2026-11-11", "leads_automatize_total", "arquivado", 439) in [tuple(r) for r in linhas]
+    assert ("2026-11-11", "leads_automatize_total", "novo", 44351) in [tuple(r) for r in linhas]
+
+
 def test_layout_request_rectangles_and_visible_rows():
     import dashboard_analytics as d
     from collections import defaultdict

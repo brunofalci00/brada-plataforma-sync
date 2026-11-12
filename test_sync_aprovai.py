@@ -2,7 +2,7 @@
 AprovAI dentro da conta Asaas compartilhada, e de teste/staff. Nenhuma chamada
 de rede; so os dois filtros que decidem o que entra no dashboard."""
 
-from sync_aprovai import is_aprovai_transaction, is_teste_ou_staff, resumo_asaas
+from sync_aprovai import is_aprovai_transaction, is_teste_ou_staff, resumo_asaas, resumo_pre_approvals
 
 
 def test_aprovai_por_descricao():
@@ -68,3 +68,21 @@ def test_resumo_asaas_exclui_refunded_e_teste():
     assert resumo["assinantes_reais_ativos"] == 1  # so a confirmada e nao-teste
     assert resumo["mrr_real"] == 89
     assert resumo["cobrancas_teste_ou_staff_sucesso"] == 1
+
+
+def test_resumo_pre_approvals_separa_migrado_sem_billing_de_billing_real():
+    docs = [
+        {"subscriptionStatus": "active", "migratedFromKiwify": True, "subscriptionExpiresAt": None},
+        {"subscriptionStatus": "active", "migratedFromKiwify": True, "subscriptionExpiresAt": None},
+        {"subscriptionStatus": "active", "migratedFromKiwify": None, "subscriptionExpiresAt": "2026-11-20"},
+        {"subscriptionStatus": "inactive", "migratedFromKiwify": True, "subscriptionExpiresAt": None},
+    ]
+    resumo = resumo_pre_approvals(docs)
+    assert resumo["total_ativos_no_app"] == 3
+    assert resumo["migrados_kiwify_sem_billing_asaas"] == 2
+    assert resumo["com_billing_asaas_real"] == 1
+
+
+def test_resumo_pre_approvals_vazio_nao_quebra():
+    resumo = resumo_pre_approvals([])
+    assert resumo == {"total_ativos_no_app": 0, "migrados_kiwify_sem_billing_asaas": 0, "com_billing_asaas_real": 0}

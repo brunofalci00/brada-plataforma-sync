@@ -6,7 +6,7 @@ import ga_analytics
 # Bump obrigatorio quando muda a FORMA da aba: `publish` so reaplica layout se o
 # Z1 divergir, e sem isso a caixa mesclada do 4o cartao da linha 26 (que saiu)
 # ficaria formatada e vazia na planilha.
-VERSION = "v7.3-analytics-ga"
+VERSION = "v7.4-leads-real"
 ROWS = 145
 ORANGE = {"red": .773, "green": .353, "blue": .067}
 INK = {"red": .27, "green": .27, "blue": .27}
@@ -56,10 +56,13 @@ def model(m, now):
                ("Cadastros sem lead vinculado", m["automatize_sem_lead"], "number")])
     text(14, "Automatize · Cobertura dos leads", "header")
     metric_cards(15, [("Leads armazenados", "leads_total", "number"),
+                      ("Vistos pela API nos ultimos 45d", "leads_na_janela_api", "number"),
                       ("Leads com cadastro vinculado", "leads_cadastrados", "number"),
                       ("Leads com projeto vinculado", "leads_com_projeto", "number")])
-    text(18, "Fonte " + ("indisponível" if f["automatize_estado"] == "indisponivel" else "parcial")
-         + ". Total real não confirmado; esta base não é denominador de conversão total.", "warning")
+    text(18, "\"Leads armazenados\" e a contagem real da base (Firestore, count agregado; achado do audit "
+         "de 11/11: o endpoint da Automatize so devolve uma janela de 45 dias, capada em 1000/resposta). "
+         "\"Com cadastro/projeto vinculado\" so cruzam quem a API devolveu nessa janela: nao e fracao do "
+         "total armazenado, e sim do recorte recente.", "warning")
     text(19, "Última ingestão de leads: " + (f["automatize_ultima_ingestao"] or "não registrada")
          + ". Vínculos com cadastros recalculados em cada foto.")
     text(21, "Plataforma · Estoque e prazo de captação", "header")

@@ -177,6 +177,29 @@ def init_aprovai_firestore():
     return firestore.Client(project=APROVAI_FIREBASE_PROJECT, credentials=creds)
 
 
+def coletar_pre_approvals(db):
+    """Achado do audit de 11/11: o card de assinantes/MRR so olha o Asaas, que
+    mostrou 0 assinante real numa rodada ao vivo. A collection `payment_pre_approvals`
+    (app do Thiago) tem 22 registros `subscriptionStatus=active`, 18 deles com
+    `migratedFromKiwify=true` e SEM `subscriptionExpiresAt`/`initialSubscriptionDate`
+    (nenhuma assinatura recorrente foi de fato provisionada no Asaas pra eles -
+    parecem artefato de migracao, nao assinante cobrando hoje). Os outros 4 tem
+    data de inicio/expiracao real. Nao da pra arbitrar qual numero e o assinante
+    'de verdade' sem o Thiago; o certo e mostrar os dois lados, nao escolher um."""
+    docs = [d.to_dict() for d in db.collection("payment_pre_approvals").stream()]
+    return resumo_pre_approvals(docs)
+
+
+def resumo_pre_approvals(docs):
+    ativos = [d for d in docs if d.get("subscriptionStatus") == "active"]
+    migrados_sem_billing = sum(1 for d in ativos if d.get("migratedFromKiwify") and not d.get("subscriptionExpiresAt"))
+    return {
+        "total_ativos_no_app": len(ativos),
+        "migrados_kiwify_sem_billing_asaas": migrados_sem_billing,
+        "com_billing_asaas_real": len(ativos) - migrados_sem_billing,
+    }
+
+
 def coletar_funil_rows(db):
     eventos = list(db.collection("analytics_funnel_events").stream())
     por_dia = {}
@@ -202,7 +225,7 @@ def coletar_funil_rows(db):
 # DASHBOARD
 # ===================================================
 
-def montar_secoes(funil_rows, resumo):
+def montar_secoes(funil_rows, resumo, pre_approvals):
     total_views = sum(r[1] for r in funil_rows)
     total_clicks = sum(r[2] for r in funil_rows)
     total_leads = sum(r[3] for r in funil_rows)
@@ -238,7 +261,25 @@ def montar_secoes(funil_rows, resumo):
         ),
         nota_aviso=True,
     )
-    return [sec1, sec2]
+
+    sec3 = kpi.Secao(
+        "Assinantes no app (Firestore) vs cobranca confirmada (Asaas) - divergencia a validar com o Thiago",
+        [
+            (pre_approvals["total_ativos_no_app"], "Marcados 'ativo' no app (payment_pre_approvals)", None),
+            (pre_approvals["migrados_kiwify_sem_billing_asaas"], "Migrados do Kiwify sem assinatura Asaas provisionada", None),
+            (pre_approvals["com_billing_asaas_real"], "Com data de inicio/expiracao real no Asaas", None),
+            (resumo["assinantes_reais_ativos"], "Confirmados por cobranca recebida no Asaas", None),
+        ],
+        nota=(
+            "O app marca 22 usuarios como assinante ativo, mas 18 vieram da migracao do Kiwify sem "
+            "'subscriptionExpiresAt'/'initialSubscriptionDate' preenchido - nunca tiveram assinatura "
+            "recorrente provisionada no Asaas, o que sugere artefato de migracao, nao cobranca real "
+            "em curso. So 4 tem data real, e mesmo esses nao aparecem confirmados na rodada do Asaas. "
+            "Numero de assinante/MRR confiavel depende de o Thiago validar qual lado esta certo."
+        ),
+        nota_aviso=True,
+    )
+    return [sec1, sec2, sec3]
 
 
 # ===================================================
@@ -270,6 +311,10 @@ def main():
     funil_rows = coletar_funil_rows(db)
     print(f"  {len(funil_rows)} dias com evento")
 
+    pre_approvals = coletar_pre_approvals(db)
+    print(f"  payment_pre_approvals: {pre_approvals['total_ativos_no_app']} ativos no app, "
+          f"{pre_approvals['migrados_kiwify_sem_billing_asaas']} migrados do Kiwify sem billing real")
+
     tabs = {
         "raw_asaas_aprovai": (HEADER_ASAAS, asaas_rows),
         "raw_funil_aprovai": (HEADER_FUNIL, funil_rows),
@@ -277,7 +322,7 @@ def main():
     sync.pii_guard(tabs)
     print("pii_guard: OK (zero hits)")
 
-    secoes = montar_secoes(funil_rows, resumo)
+    secoes = montar_secoes(funil_rows, resumo, pre_approvals)
     subtitulo = (f"Foto: {now.strftime('%d/%m/%Y %H:%M')} (Brasilia) - "
                  "views/cliques/leads do Firestore (aprovai-de156); compras/assinantes/MRR da API do Asaas")
 
