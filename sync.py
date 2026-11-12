@@ -194,6 +194,38 @@ def init_firestore():
     )
 
 
+# Estagios conhecidos da collection `leads_automatize` (conferido em 11/11 por
+# amostragem direta). Novo estagio que a Automatize crie so fica de fora do
+# RECORTE por estagio (nao do total, que exclui so "teste" por nome).
+ESTAGIOS_LEADS_AUTOMATIZE = (
+    "novo", "pronto_para_disparo", "disparo_efetuado", "pesquisa_sem_contato",
+    "arquivado", "em_contato", "aguardando_disparo",
+)
+
+
+def leads_automatize_totais(db):
+    """Total REAL da base de leads da Automatize, direto da collection Firestore
+    `leads_automatize` (nao do endpoint HTTP, que e incremental por janela de
+    45 dias e capado em 1000/resposta sem paginacao - subconta MUITO o estoque
+    real: confirmado em 11/11, endpoint/join cobre uma fracao pequena dos
+    ~53 mil documentos que existem). Usa count() agregado (poucas leituras
+    faturadas), nao stream da collection inteira.
+
+    "teste" fica de fora do total (mesmo criterio de outros `*_TESTE` do
+    projeto). Nenhum dos leads_automatize encontrados teve PII direto nesta
+    leitura (so conta por estagio); mesmo assim, nada aqui sai do agregado."""
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    col = db.collection("leads_automatize")
+    total = col.where(filter=FieldFilter("estagio", "!=", "teste")).count().get()[0][0].value
+    por_estagio = {}
+    for estagio in ESTAGIOS_LEADS_AUTOMATIZE:
+        n = col.where(filter=FieldFilter("estagio", "==", estagio)).count().get()[0][0].value
+        if n:
+            por_estagio[estagio] = n
+    return {"total": total, "por_estagio": por_estagio}
+
+
 def init_firebase_auth():
     import firebase_admin
     from firebase_admin import credentials as fb_credentials
@@ -918,7 +950,8 @@ def grupos_de_estoque(project_records):
     return {nome: grupos[nome] for nome in GRUPOS_ESTOQUE}
 
 
-def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=None):
+def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=None,
+                    leads_automatize=None):
     """Formato longo: enum novo vira so um segmento novo (zero quebra de
     schema no Looker). Firestore nao tem historico — cada dia sem snapshot
     e um ponto de serie perdido."""
@@ -1000,6 +1033,14 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
         add("migracao_base_logou", "total", mig["base_total"])
         add("migracao_donos_ativos_logaram", "logaram", mig["donos_ativos_logaram"])
         add("migracao_donos_ativos_logaram", "total", mig["donos_ativos_total"])
+
+    # Total REAL da base (count agregado no Firestore, achado do audit de
+    # 11/11: o endpoint da Automatize so cobre uma janela de 45 dias capada em
+    # 1000/resposta). Comeca a serie hoje; sem isso nunca teria historico.
+    if leads_automatize:
+        add("leads_automatize_total", "(todos)", leads_automatize["total"])
+        for estagio, n in sorted(leads_automatize["por_estagio"].items()):
+            add("leads_automatize_total", estagio, n)
     return snap
 
 def serie_semanal(snap_all, metrica, now_brt, segmento="(todos)"):
@@ -1572,6 +1613,8 @@ def main():
     print(f"firestore: proposals={len(proposals_raw)}")
     grants_raw = load_collection(db, "grants")
     print(f"firestore: grants={len(grants_raw)}")
+    leads_automatize_totais_real = leads_automatize_totais(db)
+    print(f"firestore: leads_automatize (total real, count agregado)={leads_automatize_totais_real['total']}")
     # Indice unificado (Auth + `lastLogin` do doc). Reusa `users_raw` em vez de
     # reler a colecao: a leitura de `users` ja aconteceu tres linhas acima.
     login_index = load_login_index(users_raw=users_raw)
@@ -1628,7 +1671,7 @@ def main():
     health = analytics.source_health(old_meta, leads_ok, observed_at, issues["endpoint_automatize"])
 
     snap_rows = build_snapshot(users_rows, projects_rows, proposals_rows, today_str,
-                               mig=mig_metrics)
+                               mig=mig_metrics, leads_automatize=leads_automatize_totais_real)
 
     meta_rows = [
         ["publicacao_estado", "concluida"],
@@ -1674,7 +1717,8 @@ def main():
     metrics.update(metricas_origem(projects_raw, users_raw, primeiro_envio, now_brt))
     metrics.update(mig_metrics)  # bloco MIGRACAO da aba Dashboard
     metrics["fontes"] = health
-    metrics["leads_total"] = len(leads_rows)
+    metrics["leads_total"] = leads_automatize_totais_real["total"]
+    metrics["leads_na_janela_api"] = len(leads_rows)
     metrics["leads_cadastrados"] = sum(r.get("cadastrou_plataforma") == "sim" for r in merged_leads)
     metrics["leads_com_projeto"] = sum(r.get("tem_projeto_plataforma") == "sim" for r in merged_leads)
     metrics["automatize_sem_lead"] = sum(
