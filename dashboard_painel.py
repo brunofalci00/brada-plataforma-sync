@@ -39,6 +39,14 @@ FONTE = "Roboto"
 FMT_INT = {"type": "NUMBER", "pattern": "#,##0"}
 FMT_PCT = {"type": "PERCENT", "pattern": "0.0%"}
 FMT_BRL = {"type": "CURRENCY", "pattern": '"R$" #,##0'}
+FMT_DATA = {"type": "DATE", "pattern": "dd/mm/yyyy"}
+FMT_DIA = {"type": "DATE", "pattern": "dd/mm"}
+
+
+class Formula(str):
+    """Formula montada pelo codigo (nunca texto vindo de fonte externa): vai como formulaValue.
+
+    Planilha pt-BR: argumentos com ';', numero decimal com ','; o padrao do TEXT() e en-US."""
 
 
 def cor(rgb):
@@ -303,7 +311,9 @@ class Rosca(_Componente):
 def _cel(valor=None, fmt=None, bold=False, fg=CINZA_TEXTO, bg=None, size=10, alinhar=None, wrap=False):
     # Texto vai sempre como stringValue (nunca avaliado): rotulos vem de GA/HubSpot/bancos externos.
     ued = {}
-    if isinstance(valor, bool):
+    if isinstance(valor, Formula):
+        ued["userEnteredValue"] = {"formulaValue": str(valor)}
+    elif isinstance(valor, bool):
         ued["userEnteredValue"] = {"stringValue": "sim" if valor else "nao"}
     elif isinstance(valor, (int, float)):
         ued["userEnteredValue"] = {"numberValue": valor}
@@ -385,7 +395,8 @@ class Tabela(_Componente):
         if self.linhas:
             for col in self.gradiente:
                 valores = {_numero(l[col]) for l in self.linhas}
-                if len(valores) < 2:  # coluna constante: o gradiente pintaria tudo da cor maxima
+                viva = any(isinstance(l[col], Formula) for l in self.linhas)
+                if len(valores) < 2 and not viva:  # coluna constante: o gradiente pintaria tudo da cor maxima
                     continue
                 reqs.append({"addConditionalFormatRule": {"index": 0, "rule": {
                     "ranges": [{"sheetId": pid, "startRowIndex": lin0 + 2, "endRowIndex": lin0 + 2 + len(corpo),
@@ -393,6 +404,99 @@ class Tabela(_Componente):
                     "gradientRule": {"minpoint": {"type": "NUMBER", "value": "0", "colorStyle": cor(BRANCO)},
                                      "maxpoint": {"type": "MAX", "colorStyle": cor(LARANJA_CLARO)}}}}})
         return reqs
+
+
+def _letra(c):
+    s = ""
+    c += 1
+    while c:
+        c, r = divmod(c - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+class Campo:
+    """Uma celula de filtro: rotulo em cima, valor embaixo. `opcoes` vira lista suspensa; `data`, calendario."""
+
+    def __init__(self, chave, rotulo, valor, span=1, opcoes=None, data=False):
+        self.chave, self.rotulo, self.valor, self.span = chave, rotulo, valor, span
+        self.opcoes, self.data = opcoes, data
+
+
+class Controles(_Componente):
+    """Linha de filtros que as formulas leem (`ref`). Volta ao valor padrao a cada rodada.
+
+    Tem de ser a primeira linha do painel: o endereco das celulas e fixo e as formulas
+    sao montadas antes do layout."""
+
+    em_celulas = True
+    altura = 2 * ALTURA_LINHA
+    LINHA = math.ceil(Y_CONTEUDO / ALTURA_LINHA)  # linha (0-based) dos rotulos
+
+    def __init__(self, aba, campos):
+        self.aba, self.campos = aba, campos
+        assert sum(c.span for c in campos) <= N_COLS
+
+    def _colunas(self):
+        out, c = {}, 0
+        for campo in self.campos:
+            out[campo.chave] = c
+            c += campo.span
+        return out
+
+    def ref(self, chave):
+        """Endereco absoluto da celula de valor, ex.: 'Explorar disparos'!$A$6."""
+        linha = self.LINHA + 2  # 1-based, linha de baixo do par rotulo/valor
+        return f"'{self.aba}'!${_letra(self._colunas()[chave])}${linha}"
+
+    def requests(self, ctx, pos, r0):
+        lin0 = pos[1] // ALTURA_LINHA
+        if lin0 != self.LINHA:
+            raise ValueError("Controles precisa ser a primeira linha do painel")
+        pid = ctx.painel_id
+        cols = self._colunas()
+        rotulos, valores = [{} for _ in range(N_COLS)], [{} for _ in range(N_COLS)]
+        reqs = []
+        for campo in self.campos:
+            c = cols[campo.chave]
+            rotulos[c] = _cel(campo.rotulo, fg=CINZA, size=9, bold=True)
+            valores[c] = _cel(campo.valor, fmt=FMT_DATA if campo.data else None, bold=True, bg=PESSEGO,
+                              alinhar="CENTER")
+            for r in (lin0, lin0 + 1):
+                if campo.span > 1:
+                    reqs.append({"mergeCells": {"range": {"sheetId": pid, "startRowIndex": r, "endRowIndex": r + 1,
+                                                          "startColumnIndex": c, "endColumnIndex": c + campo.span},
+                                                "mergeType": "MERGE_ALL"}})
+            celula = {"sheetId": pid, "startRowIndex": lin0 + 1, "endRowIndex": lin0 + 2,
+                      "startColumnIndex": c, "endColumnIndex": c + campo.span}
+            borda = {"style": "SOLID_MEDIUM", "colorStyle": cor(LARANJA)}
+            reqs.append({"updateBorders": {"range": celula, "top": borda, "bottom": borda, "left": borda,
+                                           "right": borda}})
+            if campo.data:
+                cond = {"type": "DATE_IS_VALID"}
+            elif campo.opcoes:
+                cond = {"type": "ONE_OF_LIST", "values": [{"userEnteredValue": o} for o in campo.opcoes]}
+            else:
+                continue
+            reqs.append({"setDataValidation": {"range": celula, "rule": {"condition": cond, "strict": True,
+                                                                          "showCustomUi": True}}})
+        reqs.insert(0, {"updateCells": {"rows": [{"values": rotulos}, {"values": valores}],
+                                        "fields": "userEnteredValue,userEnteredFormat",
+                                        "start": {"sheetId": pid, "rowIndex": lin0, "columnIndex": 0}}})
+        return reqs
+
+
+def _valor_dados(v):
+    """Celula da aba de dados: numero, texto literal ou Formula do codigo."""
+    if isinstance(v, Formula):
+        return {"userEnteredValue": {"formulaValue": str(v)}}
+    if isinstance(v, bool):
+        return {"userEnteredValue": {"stringValue": "sim" if v else "nao"}}
+    if isinstance(v, (int, float)):
+        return {"userEnteredValue": {"numberValue": v}}
+    if v is None or v == "":
+        return {}
+    return {"userEnteredValue": {"stringValue": str(v)}}
 
 
 ABA_RESUMO = "dados_resumo"
@@ -473,14 +577,16 @@ class Painel:
                 r += len(b) + 1
         return inicio, valores, formatos
 
-    def montar_requests(self, painel_id, dados_id, n_linhas, n_linhas_dados, existentes, itens, inicio, formatos):
+    def montar_requests(self, painel_id, dados_id, n_linhas, n_linhas_dados, existentes, itens, inicio, formatos,
+                        n_colunas_dados=8):
         ctx = _Ctx(painel_id, dados_id)
         reqs = [{"deleteEmbeddedObject": {"objectId": cid}} for cid in existentes["charts"]]
         reqs += [{"deleteBanding": {"bandedRangeId": bid}} for bid in existentes["bandas"]]
         reqs += [{"deleteConditionalFormatRule": {"sheetId": painel_id, "index": 0}}
                  for _ in range(existentes["condicionais"])]
         reqs += [{"unmergeCells": {"range": {"sheetId": painel_id}}},
-                 {"updateCells": {"range": {"sheetId": painel_id}, "fields": "userEnteredValue,userEnteredFormat"}},
+                 {"updateCells": {"range": {"sheetId": painel_id},
+                                  "fields": "userEnteredValue,userEnteredFormat,dataValidation"}},
                  {"updateSheetProperties": {"properties": {"sheetId": painel_id, "gridProperties": {
                      "rowCount": n_linhas, "columnCount": COLUNAS_ABA, "hideGridlines": True,
                      "frozenRowCount": 0}},
@@ -503,7 +609,7 @@ class Painel:
                                            "startColumnIndex": 0, "endColumnIndex": N_COLS}, "mergeType": "MERGE_ALL"}},
                  {"updateSheetProperties": {"properties": {"sheetId": dados_id, "hidden": True,
                                                            "gridProperties": {"rowCount": n_linhas_dados,
-                                                                              "columnCount": 8}},
+                                                                              "columnCount": n_colunas_dados}},
                                             "fields": "hidden,gridProperties(rowCount,columnCount)"}}]
         for r, c, fmt in formatos:
             reqs.append({"repeatCell": {"range": {"sheetId": dados_id, "startRowIndex": r, "endRowIndex": r + 1,
@@ -529,6 +635,7 @@ class Painel:
         inicio, valores, formatos = self.blocos(itens)
         n_linhas = math.ceil(altura / ALTURA_LINHA) + 4
         n_linhas_dados = max(len(valores) + 5, 50)
+        n_colunas_dados = max([8] + [len(v) for v in valores])
 
         meta = svc.spreadsheets().get(
             spreadsheetId=spreadsheet_id,
@@ -541,13 +648,15 @@ class Painel:
                               "bandas": [b["bandedRangeId"] for b in s.get("bandedRanges", [])],
                               "condicionais": len(s.get("conditionalFormats", []))}
 
-        if dws.row_count < n_linhas_dados:
-            dws.resize(rows=n_linhas_dados)
+        if dws.row_count < n_linhas_dados or dws.col_count < n_colunas_dados:
+            dws.resize(rows=max(dws.row_count, n_linhas_dados), cols=max(dws.col_count, n_colunas_dados))
         svc.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range=f"'{dws.title}'").execute()
-        if valores:
-            svc.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id, range=f"'{dws.title}'!A1", valueInputOption="RAW",
-                body={"values": valores}).execute()
-        reqs = self.montar_requests(ws.id, dws.id, n_linhas, n_linhas_dados, existentes, itens, inicio, formatos)
+        if valores:  # celula tipada: texto nunca vira formula; so Formula do codigo e avaliada
+            svc.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [{"updateCells": {
+                "start": {"sheetId": dws.id, "rowIndex": 0, "columnIndex": 0},
+                "rows": [{"values": [_valor_dados(v) for v in linha]} for linha in valores],
+                "fields": "userEnteredValue"}}]}).execute()
+        reqs = self.montar_requests(ws.id, dws.id, n_linhas, n_linhas_dados, existentes, itens, inicio, formatos,
+                                    n_colunas_dados)
         svc.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": reqs}).execute()
         return ws

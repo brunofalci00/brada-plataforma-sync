@@ -50,3 +50,11 @@ def test_chave_ausente_vira_zero_e_e_reportada():
     assert faltando == ["aprovai_visitas"]
     linha = next(l for l in _componente(painel, "Funil de cada produto").linhas if l[0] == "AprovAI (app)")
     assert linha[2] == 0 and linha[5] == 0
+
+
+def test_divisao_dos_disparos_entra_depois_dos_sdrs():
+    import explorar_disparos as ex
+    blocos = ex.componentes_visao_geral([], {}, AGORA.date())
+    painel, _ = vg.montar_painel(_resumo(), AGORA, blocos)
+    assert painel.linhas[2][0].titulo == "Disparos da Brenda por semana"
+    assert painel.linhas[3][0].titulo == "Fila do alocador da Brenda hoje"

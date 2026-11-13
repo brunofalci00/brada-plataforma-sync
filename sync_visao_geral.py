@@ -5,13 +5,17 @@ cada sync de canal acabou de gravar (chave -> valor). Chave ausente vira 0 e sai
 no log; a aba nao quebra.
 
 O centro da tela sao os tres SDRs da Automatize lado a lado (do disparo ao
-resultado de cada canal) e uma tabela com o funil de cada produto.
+resultado de cada canal) e uma tabela com o funil de cada produto. Logo abaixo,
+como a mesma IA (Brenda) divide os disparos entre as tres frentes e o que esta
+esperando na fila do alocador hoje (le o banco do SDR; se falhar, o bloco sai).
 """
 
 import datetime
 
 import sync
 import dashboard_painel as dp
+import explorar_disparos
+import sdr_automatize as sdr
 
 ABA = "Visão Geral"
 
@@ -44,7 +48,7 @@ def valor(r, chave, faltando):
     return dp._numero(r[chave])
 
 
-def montar_painel(r, agora):
+def montar_painel(r, agora, disparos=()):
     faltando = []
     v = lambda k: valor(r, k, faltando)  # noqa: E731
     p = dp.Painel(ABA, "Ecossistema Brada · visao geral",
@@ -59,6 +63,8 @@ def montar_painel(r, agora):
             dp.Serie("Disparo ate o primeiro resultado", ["SDR", "Conversao"],
                      [[nome, dp.taxa(v(meio), v(topo))] for nome, topo, meio in SDRS], formato=dp.FMT_PCT,
                      subtitulo="Incentivador: card no HubSpot · demais: cadastro na plataforma"))
+    for componentes in disparos:
+        p.linha(*componentes)
     linhas = []
     for nome, etapas, comeco, meio, fim in PRODUTOS:
         c, m, f = v(comeco), v(meio), v(fim)
@@ -69,12 +75,25 @@ def montar_painel(r, agora):
     return p, sorted(set(faltando))
 
 
+def disparos_da_brenda(hoje):
+    try:
+        conn = sdr.conectar()
+        try:
+            envios, fila = sdr.envios_frentes(conn), sdr.fila_do_dia(conn)
+        finally:
+            conn.close()
+    except (Exception, SystemExit) as e:  # sem banco do SDR a aba sai sem o bloco, nao quebra
+        print(f"[AVISO] banco do SDR indisponivel, Visao Geral sem divisao dos disparos: {str(e)[:160]}")
+        return ()
+    return explorar_disparos.componentes_visao_geral(envios, fila, hoje)
+
+
 def main():
     agora = datetime.datetime.now(sync.BRT)
     sh = sync.get_sheets_client().open_by_key(sync.SPREADSHEET_ID)
     svc = sync.build_sheets_service()
     resumo = dp.ler_resumo(svc, sync.SPREADSHEET_ID)
-    painel, faltando = montar_painel(resumo, agora)
+    painel, faltando = montar_painel(resumo, agora, disparos_da_brenda(agora.date()))
     if faltando:
         print(f"[AVISO] chaves ausentes no resumo (sairam como 0): {faltando}")
     painel.publicar(sh, svc, sync.SPREADSHEET_ID, indice=0)

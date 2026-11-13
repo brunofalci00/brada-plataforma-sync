@@ -23,6 +23,7 @@ Sprint 2 adiciona `raw_funil_automatize` (HubSpot `trabalhado_por=Automatize`) +
 |---|---|---|---|
 | `sync_aprovai.py` | `AprovAI`, `raw_asaas_aprovai`, `raw_funil_aprovai` | Asaas (cobrancas filtradas por `is_aprovai_transaction`, porta exata da regra do app `iasmartsites/aprovai2`) + Firestore do projeto `aprovai-de156` (`analytics_funnel_events`) + banco do SDR Brada (`modalidade = elaboracao`) | Junto do `sync.py`, mesmo workflow |
 | `sync_incentivador.py` | `Incentivador`, `raw_disparo_incentivador`, `raw_hubspot_incentivador` | Banco do SDR Brada (`modalidade = incentivador`): funil por lead, do disparo da Brenda ao card no HubSpot + estagio ATUAL do card ao vivo no HubSpot (`hubspot_incentivador.py`) + pipeline Incentivador inteiro (Automatize x Executivos) | Junto do `sync.py`, mesmo workflow |
+| `explorar_disparos.py` | `Explorar disparos`, `base_disparos` | Banco do SDR Brada, as 3 frentes: envios agregados por dia x frente x canal x fonte (sem lead). Filtros na aba (periodo A, periodo B para comparar, frente, canal, fonte, dia/semana) recalculam por formula, sem rodar nada | Junto do `sync.py`, mesmo workflow |
 
 Os tres canais do SDR Brada (Automatize) saem do mesmo banco e da mesma leitura,
 `sdr_automatize.py`: `modalidade` separa `incentivador`, `elaboracao` e
@@ -66,6 +67,11 @@ Pegadinhas do Sheets que so aparecem na planilha (nunca no dry-run), todas cober
 - rotulo da maior barra corta na borda sem folga no eixo;
 - `pieChart` nao aceita cor por fatia: a paleta vem do tema da planilha (laranja, definido em 12/11);
 - formula em planilha pt-BR usa `;` e `\` dentro de chaves.
+- no `TEXT()` o padrao e en-US (`"#,##0"`, `"0.0%"`), mas numero decimal dentro da formula usa virgula;
+- `Controles` (celulas de filtro) e a primeira linha do painel: as formulas guardam o endereco fixo delas;
+- serie que vem de `SEQUENCE` precisa de linhas vazias reservadas abaixo, senao o espalhamento da `#REF!`;
+- funil vivo desenha a barra em % do topo com eixo fixo ate 130%: o maximo muda com o filtro e o rotulo nao corta.
+- texto vindo de fonte vai sempre como texto; so `Formula` montada pelo codigo e avaliada.
 
 ## PII (inegociavel)
 
