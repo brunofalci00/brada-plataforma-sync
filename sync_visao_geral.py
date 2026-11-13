@@ -55,7 +55,7 @@ def montar_painel(r, agora, disparos=()):
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · numeros das abas de cada produto")
     p.linha(dp.Cartao("Projetos aptos a captar", v("plataforma_aptos")),
             dp.Cartao("Membros da Comunidade", v("comunidade_membros")),
-            dp.Cartao("Incentivadores em reuniao ou alem", v("incentivador_pipeline_reuniao")),
+            dp.Cartao("Incentivadores em reuniao+ (pipeline todo)", v("incentivador_pipeline_reuniao")),
             dp.Cartao("Receita digital", v("aprovai_mrr") + v("pf_valor_pago"), dp.FMT_BRL))
     p.linha(dp.Serie("Leads disparados pela Automatize", ["SDR", "Leads"],
                      [[nome, v(topo)] for nome, topo, _ in SDRS], tipo="BAR",
