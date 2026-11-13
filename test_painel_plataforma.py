@@ -40,15 +40,36 @@ def test_tendencia_descarta_dia_sem_as_duas_series():
     assert pp._tendencia(serie) == [["11/10", 381, 60]]
 
 
-def test_cartao_de_cadastros_diz_o_mes_e_o_grafico_semanal_explica_a_semana():
-    import datetime
-    from painel_plataforma import montar_painel
+def _m():
     m = {k: 0 for k in ("proj_ativos", "novos_mes", "ativos_30d", "proj_a_reativar", "proj_sem_prazo",
                         "st_rascunho", "st_concluido", "funil_cadastraram", "funil_com_projeto",
                         "funil_publicaram", "funil_aptos", "vence_30d", "vence_60d", "vence_90d", "vence_180d")}
     m.update({"semanas": [("09/11", 4)], "canais": {}})
-    painel, _ = montar_painel(m, [], None, None, datetime.datetime(2026, 11, 13, 10))
-    titulos = [c.titulo for linha in painel.linhas for c in linha]
-    assert "Cadastros em novembro (ate 13/11)" in titulos
-    semanal = [c for linha in painel.linhas for c in linha if c.titulo == "ONGs que criaram conta, por semana"][0]
-    assert "andamento" in semanal.subtitulo
+    return m
+
+
+def test_contas_novas_por_origem_sem_migrado_e_sem_quem_nao_e_ong():
+    from painel_plataforma import linhas_contas
+    users = [{"user_hash": "u1", "data_cadastro": "2026-11-10T12:00:00", "role": "ong", "is_migrado": "nao",
+              "origem_canal": "automatize"},
+             {"user_hash": "u2", "data_cadastro": "2026-11-10", "role": "ong", "is_migrado": "nao",
+              "origem_canal": "xpto"},
+             {"user_hash": "u3", "data_cadastro": "2026-11-10", "role": "ong", "is_migrado": "sim"},
+             {"user_hash": "u4", "data_cadastro": "2026-11-10", "role": "incentivador", "is_migrado": "nao"}]
+    projetos = [{"owner_hash": "u1", "status": "rascunho"}]
+    linhas = linhas_contas(users, projetos)
+    assert linhas == [[46336, "Automatize", 1, 1, 0, 0], [46336, "Sem origem", 1, 0, 0, 0]]
+
+
+def test_painel_filtros_primeiro_brenda_e_origens_vivas_e_foto_de_hoje_depois():
+    import datetime
+    from painel_plataforma import montar_painel
+    users = [{"user_hash": "u1", "data_cadastro": "2026-11-10", "role": "ong", "is_migrado": "nao",
+              "origem_canal": "site"}]
+    painel, _, bases = montar_painel(dict(_m(), proj_ativos=3, st_rascunho=2), [], None, None, datetime.datetime(2026, 11, 13, 10), users, [])
+    assert painel.linhas[0][0].__class__.__name__ == "Controles"
+    titulos = [c.titulo for linha in painel.linhas[1:] for c in linha]
+    assert "Brenda: do disparo ao projeto apto" in titulos and "Todas as origens: da conta ao projeto apto" in titulos
+    assert "Estoque de projetos (foto de hoje)" in titulos
+    assert "ONGs que criaram conta, por semana" not in titulos  # virou serie viva por origem
+    assert [b.aba for b, _ in bases] == ["base_plataforma_sdr", "base_plataforma_contas"]

@@ -24,12 +24,13 @@ CONSULTA = """
            aberto_em is not null, clicou_em is not null, respondeu_em is not null,
            (visitou_agenda_em is not null or clicou_agendar_em is not null),
            coalesce(card_hubspot_em::date >= dia, false), coalesce(cadastro_em::date >= dia, false),
-           bounce_em is not null
+           bounce_em is not null, fonte_slug
     from dados.envios
     where modalidade = %s and coalesce(origem_evento, '') not like 'backfill%%'
 """
-CAMPOS = ("lead_id", "dia", "canal", "abriu", "clicou", "respondeu", "agenda", "card", "cadastro", "bounce")
-MARCAS = CAMPOS[3:]
+CAMPOS = ("lead_id", "dia", "canal", "abriu", "clicou", "respondeu", "agenda", "card", "cadastro", "bounce",
+          "fonte")
+MARCAS = CAMPOS[3:-1]
 
 
 def _credenciais():
@@ -64,16 +65,24 @@ def envios(conn, modalidade):
 
 
 def por_lead(lista):
-    """Um registro por lead: primeiro disparo, canais e cada marca se aconteceu em qualquer envio."""
+    """Um registro por lead: primeiro disparo (e a fonte dele), canais e cada marca se aconteceu em qualquer envio."""
     leads = {}
     for e in lista:
-        l = leads.setdefault(str(e["lead_id"]), {"dia": e["dia"], "canais": set(), **{m: False for m in MARCAS}})
+        l = leads.setdefault(str(e["lead_id"]), {"dia": e["dia"], "fonte": e.get("fonte"), "canais": set(),
+                                                  **{m: False for m in MARCAS}})
         if e["dia"] and (l["dia"] is None or e["dia"] < l["dia"]):
-            l["dia"] = e["dia"]
+            l["dia"], l["fonte"] = e["dia"], e.get("fonte")
         l["canais"].add(e["canal"] or "?")
         for m in MARCAS:
             l[m] |= bool(e[m])
     return leads
+
+
+def canal_do_lead(canais):
+    """Rotulo do canal de um lead para filtro: E-mail, WhatsApp ou os dois."""
+    zap = "whatsapp" in canais
+    email = any(c != "whatsapp" for c in canais)
+    return "E-mail + WhatsApp" if zap and email else ("WhatsApp" if zap else "E-mail")
 
 
 def segunda(dia):
