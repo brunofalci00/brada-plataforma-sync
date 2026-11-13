@@ -39,9 +39,9 @@ def _painel():
 def test_formulas_leem_os_filtros_com_separador_pt_br():
     flt = ex.Filtros(ex.controles(AGORA.date(), ["salic"]))
     f = flt.soma_p("abriram", frente="Incentivador", canal=False)
-    assert f.startswith("SUMIFS(base_disparos!$G:$G;base_disparos!$A:$A;\">=\"&'Explorar disparos'!$A$6")
+    assert f.startswith("SUMIFS(base_disparos!$G:$G;base_disparos!$A:$A;\">=\"&'Brenda'!$A$6")
     assert '"Incentivador"' in f and "base_disparos!$C:$C" not in f  # canal ignorado, frente fixa
-    assert "IF('Explorar disparos'!$H$6=\"Todas\";\"*\"" in f  # fonte segue o filtro
+    assert "IF('Brenda'!$H$6=\"Todas\";\"*\"" in f  # fonte segue o filtro
     assert "," not in f.replace('"#,##0"', "")
 
 
