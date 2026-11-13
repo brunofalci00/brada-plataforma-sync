@@ -103,7 +103,7 @@ def test_funil_de_elaboracao_e_cumulativo():
         _envio_elab("a"), _envio_elab("b", abriu=True), _envio_elab("c", respondeu=True),
         _envio_elab("d", cadastro=True)]))
     assert funil_elaboracao(leads) == [("Disparados", 4), ("Abriram", 3), ("Clicaram ou responderam", 2),
-                                       ("Cadastro na plataforma", 1)]
+                                       ("Cadastro na plataforma Brada", 1)]
 
 
 def test_cobrancas_por_situacao_ignora_teste_e_agrupa_status():
@@ -128,5 +128,62 @@ def test_painel_sem_banco_do_sdr_fica_so_com_o_app():
     painel, kpis = montar_painel([["2026-11-11", 7, 1, 1, "f"]], resumo, pre, [], None, None,
                                  datetime.datetime(2026, 11, 12, 9))
     titulos = [c.titulo for linha in painel.linhas for c in linha]
-    assert "SDR de elaboracao (Automatize)" not in titulos and "Funil do app" in titulos
+    assert "Brenda: SDR de elaboracao" not in titulos and "Site do AprovAI" in titulos
     assert "elaboracao_disparados" not in kpis and kpis["aprovai_visitas"] == 7
+
+
+def test_cpf_valido_aceita_cpf_real_e_recusa_sequencia():
+    from sync_aprovai import cpf_valido
+    assert cpf_valido("529.982.247-25")
+    assert not cpf_valido("1234567890")
+    assert not cpf_valido("111.111.111-11")
+    assert not cpf_valido("529.982.247-24")
+    assert not cpf_valido(None)
+
+
+def test_lead_de_teste_so_quando_cpf_preenchido_e_invalido():
+    from sync_aprovai import lead_de_teste
+    assert lead_de_teste({"lead": {"cpf": "1234567890"}})
+    assert not lead_de_teste({"lead": {"cpf": "52998224725"}})
+    assert not lead_de_teste({"lead": {}})
+    assert not lead_de_teste({"lead": "texto"})
+
+
+def test_funil_do_app_ignora_lead_de_teste():
+    from sync_aprovai import coletar_funil_rows
+
+    class Doc:
+        def __init__(self, d):
+            self.d = d
+
+        def to_dict(self):
+            return self.d
+
+    eventos = [Doc({"type": "page_view", "timestamp": "2026-10-26T10:00:00Z"}),
+               Doc({"type": "lead_captured", "timestamp": "2026-10-26T17:17:35Z", "lead": {"cpf": "1234567890"}}),
+               Doc({"type": "lead_captured", "timestamp": "2026-10-27T09:00:00Z", "lead": {"cpf": "52998224725"}})]
+
+    class Colecao:
+        def stream(self):
+            return iter(eventos)
+
+    class Db:
+        def collection(self, nome):
+            return Colecao()
+
+    rows = coletar_funil_rows(Db())
+    assert [(r[0], r[1], r[3]) for r in rows] == [("2026-10-26", 1, 0), ("2026-10-27", 0, 1)]
+
+
+def test_cartoes_separam_brenda_do_site():
+    import datetime
+    from sync_aprovai import montar_painel
+    resumo = {"assinantes_reais_ativos": 0, "mrr_real": 0}
+    pre = {"total_ativos_no_app": 22, "migrados_kiwify_sem_billing_asaas": 17, "com_billing_asaas_real": 5}
+    painel, _ = montar_painel([["2026-11-11", 7, 1, 0, "f"]], resumo, pre, [], None, None,
+                              datetime.datetime(2026, 11, 12, 9))
+    cartoes = [c.titulo for c in painel.linhas[0]]
+    assert cartoes == ["Brenda: leads disparados", "Brenda: cadastro depois do disparo",
+                       "Site: visitas (todas as origens)", "Site: assinantes pagantes"]
+    titulos = [c.titulo for linha in painel.linhas for c in linha]
+    assert "Quem e assinante de verdade" in titulos and "Assinantes: app x Asaas" not in titulos

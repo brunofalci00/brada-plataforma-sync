@@ -38,3 +38,17 @@ def test_valor_em_pega_o_ultimo_dia_com_dado_ate_a_data():
 def test_tendencia_descarta_dia_sem_as_duas_series():
     serie = [["2026-10-10", 380, ""], ["2026-10-11", 381, 60]]
     assert pp._tendencia(serie) == [["11/10", 381, 60]]
+
+
+def test_cartao_de_cadastros_diz_o_mes_e_o_grafico_semanal_explica_a_semana():
+    import datetime
+    from painel_plataforma import montar_painel
+    m = {k: 0 for k in ("proj_ativos", "novos_mes", "ativos_30d", "proj_a_reativar", "proj_sem_prazo",
+                        "st_rascunho", "st_concluido", "funil_cadastraram", "funil_com_projeto",
+                        "funil_publicaram", "funil_aptos", "vence_30d", "vence_60d", "vence_90d", "vence_180d")}
+    m.update({"semanas": [("09/11", 4)], "canais": {}})
+    painel, _ = montar_painel(m, [], None, None, datetime.datetime(2026, 11, 13, 10))
+    titulos = [c.titulo for linha in painel.linhas for c in linha]
+    assert "Cadastros em novembro (ate 13/11)" in titulos
+    semanal = [c for linha in painel.linhas for c in linha if c.titulo == "ONGs que criaram conta, por semana"][0]
+    assert "andamento" in semanal.subtitulo

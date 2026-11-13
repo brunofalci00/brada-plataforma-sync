@@ -66,3 +66,13 @@ def test_fila_do_dia_separa_enviados_e_espera_com_canal_mais_comum():
                                    ("incentivador", "enviado", "email", 8)]))
     assert fila["elaboracao"] == {"enviados": 0, "na_fila": 239, "canal_fila": "whatsapp"}
     assert fila["incentivador"] == {"enviados": 8, "na_fila": 0, "canal_fila": ""}
+
+
+def test_cadastro_e_card_so_contam_depois_do_disparo():
+    """3 dos 4 cadastros da elaboracao (e 5 dos 52 dos aprovados) eram de quem ja tinha
+    conta antes do e-mail. As duas consultas tem que exigir data >= dia do envio."""
+    import sdr_automatize as sdra
+    for consulta in (sdra.CONSULTA, sdra.CONSULTA_FRENTES):
+        assert "coalesce(cadastro_em::date >= dia, false)" in consulta
+        assert "coalesce(card_hubspot_em::date >= dia, false)" in consulta
+        assert "cadastro_em is not null" not in consulta
