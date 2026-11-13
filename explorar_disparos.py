@@ -95,9 +95,15 @@ def bounce(flt, **fixos):
     return f'IFERROR(1-{flt.soma_p("entregues", **fixos)}/{flt.soma_p("envios", **fixos)};0)'
 
 
+MIN_ENVIOS_TAXA = 20  # abaixo disso a taxa engana (2 envios entregues = "100% de entrega")
+
+
 def taxas_vivas(flt, dimensao, valores):
-    linhas = [[nome] + [F(flt.taxa(etapa, **{dimensao: v})) for v in valores] for nome, etapa in TAXAS]
-    return linhas + [["Bounce"] + [F(bounce(flt, **{dimensao: v})) for v in valores]]
+    """Taxas por valor da dimensao; valor com menos de MIN_ENVIOS_TAXA envios no periodo A fica vazio."""
+    def cel(formula, v):
+        return F(f'IF({flt.soma_p("envios", **{dimensao: v})}<{MIN_ENVIOS_TAXA};"";{formula})')
+    linhas = [[nome] + [cel(flt.taxa(etapa, **{dimensao: v}), v) for v in valores] for nome, etapa in TAXAS]
+    return linhas + [["Bounce"] + [cel(bounce(flt, **{dimensao: v}), v) for v in valores]]
 
 
 def montar_painel(linhas_base, agora, foto=()):
@@ -127,10 +133,10 @@ def montar_painel(linhas_base, agora, foto=()):
                          subtitulo="Por dia ou semana (filtro 'Agrupar por'), empilhado por frente", altura=320))
     p.linha(fl.SerieViva("Taxas por canal no período A", ["Taxa"] + [n for _, n in CANAIS],
                          taxas_vivas(flt, "canal", [c for _, c in CANAIS]),
-                         formato=dp.FMT_PCT, subtitulo="% dos envios de cada canal"),
+                         formato=dp.FMT_PCT, subtitulo="% dos envios de cada canal · vazio = menos de 20 envios no periodo"),
             fl.SerieViva("Taxas por frente no período A", ["Taxa"] + [n for _, n in FRENTES],
                          taxas_vivas(flt, "frente", [n for _, n in FRENTES]),
-                         formato=dp.FMT_PCT, subtitulo="% dos envios de cada frente"))
+                         formato=dp.FMT_PCT, subtitulo="% dos envios de cada frente · vazio = menos de 20 envios no periodo"))
     p.linha(fl.por_dimensao("Por fonte do lead no período A", flt, "fonte", com_volume,
                             [("Envios", "soma", "envios"), ("Abertura", "taxa", "abriram"),
                              ("Clique ou resposta", "taxa", "engajaram"), ("Resultado", "soma", "resultado"),

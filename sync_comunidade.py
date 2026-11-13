@@ -17,6 +17,7 @@ import sync
 import dashboard_painel as dp
 import ga_analytics
 import painel_filtros as fl
+from painel_filtros import F
 
 PROJETO = "brada-comunidade-c1ba5"
 DATABASE = "default"
@@ -244,8 +245,12 @@ def montar_painel(m, linhas, agora, base_linhas=()):
     p.linha(fl.comparacao_ab("Periodo A contra periodo B (cada evento na data em que aconteceu)", flt, ETAPAS_COM))
     p.linha(fl.evolucao("Cadastros no periodo A", flt, "cadastros", "perfil", perfis,
                         subtitulo="Por dia ou semana, empilhado por perfil"),
-            fl.evolucao("Primeiras acoes no periodo A", flt, "acoes", "perfil", perfis,
-                        subtitulo="Por dia ou semana, empilhado por perfil"))
+            # Quase todo evento de primeira acao chega sem perfil: empilhar por perfil mostrava
+            # tudo cinza ("Sem perfil"). Serie unica, que ignora o filtro de perfil, ate o app gravar o perfil.
+            fl.SerieViva("Primeiras acoes no periodo A", ["Dia", "Primeiras acoes"],
+                         [[F(flt.sequencia()), F(flt.por_ponto("acoes", perfil=False))]],
+                         n_linhas=fl.MAX_PONTOS, formato_dominio=dp.FMT_DIA, rotulos=False, altura=320,
+                         subtitulo="Por dia ou semana · todos os perfis (o evento ainda nao traz o perfil)"))
     p.linha(dp.Cartao("Visitantes (30 dias)", ga["ativos"] if ga else 0),
             dp.Cartao("Membros (hoje)", m["membros"]),
             dp.Cartao("Entraram em 30 dias", m["login_30d"]),
