@@ -33,6 +33,8 @@ BEYOND_REUNIAO = [
     "1246562476", "1246562478", "1246602642", "1246602643", "1247329454",
     "decisionmakerboughtin", "1253324968", "contractsent", "1247329455", "1247329456",
 ]
+# Ganho e pos-venda: o patrocinio fechou.
+GANHO_OU_ALEM = ["1253324968", "contractsent", "1247329455", "1247329456"]
 STAGE_LABELS = {
     "appointmentscheduled": "[SDR] Inbound",
     "1246562475": "[SDR] Outbound",

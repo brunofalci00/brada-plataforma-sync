@@ -33,7 +33,9 @@ BORDA = (0.86, 0.86, 0.86)
 BRANCO = (1, 1, 1)
 VERDE = (0.13, 0.55, 0.30)
 VERMELHO = (0.80, 0.20, 0.15)
-PALETA = [LARANJA, LARANJA_CLARO, CINZA, (0.55, 0.24, 0.05)]
+# As 4 primeiras valem para quase tudo; as outras so entram em serie com 5+ categorias (ex.: origem).
+PALETA = [LARANJA, LARANJA_CLARO, CINZA, (0.55, 0.24, 0.05), (0.80, 0.80, 0.80), (0.85, 0.62, 0.12),
+          (0.22, 0.22, 0.22), (0.98, 0.86, 0.76)]
 FONTE = "Roboto"
 
 FMT_INT = {"type": "NUMBER", "pattern": "#,##0"}
