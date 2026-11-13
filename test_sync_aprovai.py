@@ -125,11 +125,13 @@ def test_painel_sem_banco_do_sdr_fica_so_com_o_app():
     from sync_aprovai import montar_painel
     resumo = {"assinantes_reais_ativos": 0, "mrr_real": 0}
     pre = {"total_ativos_no_app": 22, "migrados_kiwify_sem_billing_asaas": 17, "com_billing_asaas_real": 5}
-    painel, kpis = montar_painel([["2026-11-11", 7, 1, 1, "f"]], resumo, pre, [], None, None,
-                                 datetime.datetime(2026, 11, 12, 9))
-    titulos = [c.titulo for linha in painel.linhas for c in linha]
-    assert "Brenda: SDR de elaboracao" not in titulos and "Site do AprovAI" in titulos
+    painel, kpis, bases = montar_painel([["2026-11-11", 7, 1, 1, "f"]], resumo, pre, [], None, None,
+                                        datetime.datetime(2026, 11, 12, 9))
+    titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
+    assert "Site do AprovAI (periodo A)" in titulos
     assert "elaboracao_disparados" not in kpis and kpis["aprovai_visitas"] == 7
+    (_, site), (_, elab) = bases
+    assert site[0][1:] == [7, 1, 1] and elab == []
 
 
 def test_cpf_valido_aceita_cpf_real_e_recusa_sequencia():
@@ -180,10 +182,10 @@ def test_cartoes_separam_brenda_do_site():
     from sync_aprovai import montar_painel
     resumo = {"assinantes_reais_ativos": 0, "mrr_real": 0}
     pre = {"total_ativos_no_app": 22, "migrados_kiwify_sem_billing_asaas": 17, "com_billing_asaas_real": 5}
-    painel, _ = montar_painel([["2026-11-11", 7, 1, 0, "f"]], resumo, pre, [], None, None,
-                              datetime.datetime(2026, 11, 12, 9))
-    cartoes = [c.titulo for c in painel.linhas[0]]
-    assert cartoes == ["Brenda: leads disparados", "Brenda: cadastro depois do disparo",
-                       "Site: visitas (todas as origens)", "Site: assinantes pagantes"]
-    titulos = [c.titulo for linha in painel.linhas for c in linha]
-    assert "Quem e assinante de verdade" in titulos and "Assinantes: app x Asaas" not in titulos
+    painel, _, _ = montar_painel([["2026-11-11", 7, 1, 0, "f"]], resumo, pre, [], None, None,
+                                 datetime.datetime(2026, 11, 12, 9))
+    cartoes = [c.titulo for c in painel.linhas[1]]
+    assert cartoes == ["Brenda: leads disparados", "Brenda: cadastros", "Site: visitas", "Site: leads"]
+    titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
+    assert "Quem e assinante de verdade (foto de hoje, sem filtro)" in titulos
+    assert "Anuncios (aguardando dado)" in titulos

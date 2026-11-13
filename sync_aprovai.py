@@ -30,6 +30,8 @@ from collections import Counter
 import sync  # reusa auth Sheets, hash_id, pii_guard, write_overwrite, retry
 import dashboard_painel as dp
 import ga_analytics
+import painel_filtros as fl
+from painel_filtros import F
 
 # ===================================================
 # CONFIG
@@ -287,54 +289,93 @@ def visitas_por_dia(funil_rows, hoje, dias=30):
     return out
 
 
-def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora):
+ABA = "AprovAI"
+BASE_SITE = fl.Base("base_aprovai_site", [], [
+    ("visitas", "Visitas"), ("cliques", "Cliques no botao"), ("leads", "Leads")])
+FUNIL_SITE = [("Visitas a pagina", "visitas"), ("Cliques no botao", "cliques"), ("Leads", "leads")]
+BASE_ELAB = fl.Base("base_aprovai_brenda", [("canal", "Canal", fl.TODOS), ("fonte", "Fonte", fl.TODAS)], [
+    ("disparados", "Disparados"), ("entregues", "Entregues"), ("abriram", "Abriram"),
+    ("engajaram", "Clicaram ou responderam"), ("cadastro", "Cadastro")])
+FUNIL_ELAB = [("Disparados", "disparados"), ("Entregues", "entregues"), ("Abriram", "abriram"),
+              ("Clicaram ou responderam", "engajaram"), ("Cadastro na plataforma Brada", "cadastro")]
+CANAIS = ["E-mail", "WhatsApp", "E-mail + WhatsApp"]
+
+
+def linhas_site(funil_rows):
+    return BASE_SITE.agregar(
+        (datetime.date.fromisoformat(r[0]), {}, {"visitas": r[1], "cliques": r[2], "leads": r[3]})
+        for r in funil_rows if r[0])
+
+
+def linhas_elab(leads):
     import sdr_automatize as sdra
+    return BASE_ELAB.agregar(
+        (l["dia"], {"canal": sdra.canal_do_lead(l["canais"]), "fonte": l.get("fonte")},
+         {"disparados": 1, "entregues": l["abriu"] or not l.get("bounce"), "abriram": l["abriu"],
+          "engajaram": l["engajou"], "cadastro": l["cadastro"]})
+        for l in (leads or {}).values())
+
+
+def _visitas_vivas(fsite):
+    linha = [F(fsite.sequencia()), F(fsite.por_ponto("visitas")), F(fsite.por_ponto("cliques"))]
+    return fl.SerieViva("Site: visitas e cliques no periodo A", ["Dia", "Visitas", "Cliques"], [linha],
+                        n_linhas=fl.MAX_PONTOS, formato_dominio=dp.FMT_DIA, tipo="LINE", rotulos=False,
+                        altura=320, subtitulo="Por dia ou semana · todas as origens")
+
+
+def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora):
+    """Filtros no topo; Brenda (elaboracao) e site, vivos pelo periodo, lado a lado e sem ligacao
+    (o link do disparo nao tem UTM e o site nao grava origem); depois a foto de hoje."""
     hoje = agora.date()
     app = funil_app(funil_rows, resumo)
-    p = dp.Painel("AprovAI", "AprovAI · do disparo de elaboracao ao assinante",
-                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + Firestore do app + Asaas")
-    elab = funil_elaboracao(leads_elab) if leads_elab is not None else None
-    # Dois mundos sem ligacao (o link do disparo nao tem UTM): o par da esquerda e da
-    # Brenda, o da direita e do site. Lado a lado na mesma linha pareciam um funil so.
-    p.linha(dp.Cartao("Brenda: leads disparados", elab[0][1] if elab else 0),
-            dp.Cartao("Brenda: cadastro depois do disparo", elab[-1][1] if elab else 0),
-            dp.Cartao("Site: visitas (todas as origens)", app[0][1]),
-            dp.Cartao("Site: assinantes pagantes", resumo["assinantes_reais_ativos"]))
-    funil_do_app = dp.Funil("Site do AprovAI", app, altura=320,
-                            subtitulo="Todas as origens · % sobre as visitas · nao liga ao disparo (link sem UTM)")
-    if elab:
-        p.linha(dp.Funil("Brenda: SDR de elaboracao", elab, altura=320,
-                         subtitulo="So e-mail · o WhatsApp religado em novembro ainda nao grava no banco"),
-                funil_do_app)
-        ultimo = sdra.ultimo_disparo(envios_elab)
-        p.linha(dp.Serie("Disparos de elaboracao por semana", ["Semana", "E-mail", "WhatsApp"],
-                         sdra.por_semana(envios_elab, hoje, 10), empilhado=True,
-                         subtitulo=f"Ultimo disparo {ultimo.strftime('%d/%m') if ultimo else '-'}"),
-                dp.Serie("Visitas e cliques no app por dia", ["Dia", "Visitas", "Cliques"],
-                         visitas_por_dia(funil_rows, hoje), tipo="LINE", rotulos=False,
-                         subtitulo="Ultimos 30 dias"))
-    else:
-        p.linha(funil_do_app, dp.Serie("Visitas e cliques no app por dia", ["Dia", "Visitas", "Cliques"],
-                                       visitas_por_dia(funil_rows, hoje), tipo="LINE", rotulos=False))
-    p.linha(dp.Funil("Quem e assinante de verdade", [
+    site, elab_l = linhas_site(funil_rows), linhas_elab(leads_elab)
+    canais = [c for c in CANAIS if c in BASE_ELAB.opcoes(elab_l, "canal")] or CANAIS[:1]
+    ctl = fl.controles(ABA, hoje, [fl.campo_lista("canal", "Canal da Brenda", canais, todos=fl.TODOS, span=2),
+                                   fl.campo_lista("fonte", "Fonte do lead", BASE_ELAB.opcoes(elab_l, "fonte"),
+                                                  span=2)])
+    fe, fs = fl.Filtros(ctl, BASE_ELAB), fl.Filtros(ctl, BASE_SITE)
+    p = dp.Painel(ABA, "AprovAI · do disparo de elaboracao e da visita ao assinante",
+                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + Firestore do app + Asaas"
+                  " · mude as células claras abaixo")
+    p.linha(ctl)
+    p.linha(fl.CartaoVivo("Brenda: leads disparados", fe.soma_p("disparados", "A"), fe.soma_p("disparados", "B")),
+            fl.CartaoVivo("Brenda: cadastros", fe.soma_p("cadastro", "A"), fe.soma_p("cadastro", "B")),
+            fl.CartaoVivo("Site: visitas", fs.soma_p("visitas", "A"), fs.soma_p("visitas", "B")),
+            fl.CartaoVivo("Site: leads", fs.soma_p("leads", "A"), fs.soma_p("leads", "B")))
+    p.linha(fl.FunilVivo("Brenda: SDR de elaboracao (periodo A)", fe, FUNIL_ELAB, altura=340,
+                         subtitulo="Leads na data do 1o disparo · filtros de canal e fonte"),
+            fl.FunilVivo("Site do AprovAI (periodo A)", fs, FUNIL_SITE, altura=340,
+                         subtitulo="Todas as origens · o site nao grava UTM, nao liga ao disparo"))
+    p.linha(fl.comparacao_ab("Brenda: periodo A contra periodo B", fe, FUNIL_ELAB))
+    p.linha(fl.comparacao_ab("Site: periodo A contra periodo B", fs, FUNIL_SITE))
+    p.linha(fl.evolucao("Brenda: leads disparados no periodo A", fe, "disparados", "canal", canais,
+                        subtitulo="Por dia ou semana, empilhado por canal"), _visitas_vivas(fs))
+    recentes = hoje - datetime.timedelta(days=2 * fl.JANELA_PADRAO - 1)
+    fontes = BASE_ELAB.opcoes(elab_l, "fonte", desde=recentes)
+    if fontes:
+        p.linha(fl.por_dimensao("Brenda por fonte do lead (periodo A)", fe, "fonte", fontes, [
+            ("Disparados", "soma", "disparados"), ("Abertura", "taxa", "abriram"),
+            ("Engajamento", "taxa", "engajaram"), ("Cadastros", "soma", "cadastro"),
+            ("Taxa cadastro", "taxa", "cadastro")], gradiente=[1, 5], cabecalho_dim="Fonte"))
+    p.linha(dp.Tabela("Anuncios (aguardando dado)", ["Etapa", "Situacao"], [
+        ["Investimento, impressoes e cliques", "Falta acesso de leitura ao Meta Ads"],
+        ["Visita com origem do anuncio", "Falta o site gravar a UTM em analytics_funnel_events"],
+        ["Custo por lead e por assinante", "Depende das duas linhas acima"]]))
+    p.linha(dp.Funil("Quem e assinante de verdade (foto de hoje, sem filtro)", [
                 ("Marcados como ativos no app", pre_approvals["total_ativos_no_app"]),
                 ("Com assinatura registrada", pre_approvals["com_billing_asaas_real"]),
                 ("Pagando no Asaas", resumo["assinantes_reais_ativos"])],
                 subtitulo=f"So a ultima barra e receita · {pre_approvals['migrados_kiwify_sem_billing_asaas']} "
                           "ativos vieram do Kiwify sem cobranca"),
-            dp.Rosca("Cobrancas do AprovAI no Asaas", cobrancas_por_situacao(asaas_rows),
+            dp.Rosca("Cobrancas do AprovAI no Asaas (foto de hoje)", cobrancas_por_situacao(asaas_rows),
                      subtitulo="Sem testes da equipe"))
-    if elab:
-        p.linha(dp.Tabela("SDR de elaboracao por semana de disparo",
-                          ["Semana", "Disparados", "Abriram", "Engajaram", "Cadastro", "Disparo > cadastro"],
-                          sdra.coorte(leads_elab, hoje, ["abriu", "engajou", "cadastro"]),
-                          formatos=[None] + [dp.FMT_INT] * 4 + [dp.FMT_PCT], gradiente=[5]))
+    elab = funil_elaboracao(leads_elab) if leads_elab is not None else None
     resumo_kpi = {"aprovai_visitas": app[0][1], "aprovai_leads": app[2][1],
                   "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],
                   "aprovai_ativos_app": pre_approvals["total_ativos_no_app"]}
     if elab:
         resumo_kpi.update({"elaboracao_disparados": elab[0][1], "elaboracao_cadastros": elab[-1][1]})
-    return p, resumo_kpi
+    return p, resumo_kpi, [(BASE_SITE, site), (BASE_ELAB, elab_l)]
 
 
 def coletar_elaboracao():
@@ -394,7 +435,7 @@ def main():
 
     print("Puxando banco do SDR Brada (so elaboracao)...")
     leads_elab, envios_elab = coletar_elaboracao()
-    painel, resumo_kpi = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now)
+    painel, resumo_kpi, bases = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now)
     print("  resumo:", resumo_kpi)
 
     if args.dry_run:
@@ -408,6 +449,8 @@ def main():
     for nome, (header, rows) in tabs.items():
         sync.write_overwrite(sh, nome, header, rows)
     svc = sync.build_sheets_service()
+    for base, linhas in bases:
+        base.publicar(sh, svc, sync.SPREADSHEET_ID, linhas)
     painel.publicar(sh, svc, sync.SPREADSHEET_ID)
     dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo_kpi, now)
     print("AprovAI: aba e raws atualizados.")

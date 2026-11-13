@@ -14,6 +14,7 @@ import os
 
 import sync
 import dashboard_painel as dp
+import painel_filtros as fl
 
 SECRETS_FILE = os.path.expanduser("~/.brada-secrets/automatize-primeira-fila-dados.env")
 
@@ -104,6 +105,77 @@ CONSULTA_DIARIO = BASE + """
     from dias group by d order by d"""
 
 
+TZ = "America/Sao_Paulo"
+
+# Um registro por espaco captado, na data da captacao; etapas = estado de hoje.
+CONSULTA_HUNTER = f"""
+    select (l.created_at at time zone '{TZ}')::date, l.cidade, l.categoria,
+           (select e.canal from dados.hunter_envios e where e.lead_id = l.id order by e.enviado_em limit 1),
+           l.disparado_em is not null or exists (select 1 from dados.hunter_envios e where e.lead_id = l.id),
+           exists (select 1 from dados.hunter_envios e where e.lead_id = l.id and e.respondeu_em is not null),
+           l.link_enviado_em is not null
+             or exists (select 1 from dados.hunter_envios e where e.lead_id = l.id and e.link_enviado_em is not null),
+           l.link_clicado_em is not null or coalesce(l.link_cliques, 0) > 0
+             or exists (select 1 from dados.hunter_envios e where e.lead_id = l.id and e.link_clicado_em is not null),
+           l.cadastrado_em is not null
+             or exists (select 1 from dados.hunter_envios e where e.lead_id = l.id and e.cadastrado_em is not null)
+    from dados.hunter_leads l"""
+
+# Demanda: cada etapa conta na data em que aconteceu, com a cidade do espaco.
+CONSULTA_DEMANDA = BASE + f"""
+    select (c.clicked_at at time zone '{TZ}')::date, e.cidade, 'cliques' from cliques_reais c
+      join espacos_reais e on e.protocol = c.venue_protocol
+    union all select (c.criada_em at time zone '{TZ}')::date, e.cidade, 'conversas' from conversas_reais c
+      join espacos_reais e on e.id = c.venue_id
+    union all select (r.created_at at time zone '{TZ}')::date, e.cidade, 'pedidos' from reservas_reais r
+      join espacos_reais e on e.id = r.venue_id
+    union all select (r.pago_em at time zone '{TZ}')::date, e.cidade, 'pagas' from reservas_reais r
+      join espacos_reais e on e.id = r.venue_id
+      where r.pagamento_status = 'pago' and r.status <> 'cancelada' and r.pago_em is not null"""
+
+ABA = "Primeira Fila"
+BASE_HUNTER = fl.Base("base_pf_hunter", [("cidade", "Cidade", fl.TODAS), ("categoria", "Categoria", fl.TODAS),
+                                         ("canal", "Canal", fl.TODOS)], [
+    ("captados", "Captados"), ("abordados", "Abordados"), ("responderam", "Responderam"),
+    ("link", "Link enviado"), ("clicou", "Clicaram no link"), ("cadastrou", "Cadastraram")])
+FUNIL_HUNTER = [("Espacos captados", "captados"), ("Abordados", "abordados"), ("Responderam", "responderam"),
+                ("Link enviado", "link"), ("Clicaram no link", "clicou"), ("Cadastraram", "cadastrou")]
+BASE_DEMANDA = fl.Base("base_pf_demanda", [("cidade", "Cidade", fl.TODAS)], [
+    ("cliques", "Cliques em anuncios"), ("conversas", "Conversas"), ("pedidos", "Pedidos de reserva"),
+    ("pagas", "Reservas pagas")])
+FUNIL_DEMANDA = [("Cliques em anuncios", "cliques"), ("Conversas no chat", "conversas"),
+                 ("Pedidos de reserva", "pedidos"), ("Reservas pagas", "pagas")]
+CANAIS = {"whatsapp": "WhatsApp", "email": "E-mail", "e-mail": "E-mail", "instagram": "Instagram"}
+
+
+def _canal(c):
+    if not c:
+        return "Sem envio"
+    return CANAIS.get(str(c).strip().lower(), str(c).strip().capitalize())
+
+
+def _etapas(abordado, respondeu, link, clicou, cadastrou):
+    """Cumulativas de tras para frente: quem cadastrou tambem clicou, recebeu link, respondeu e foi abordado."""
+    clicou = clicou or cadastrou
+    link = link or clicou
+    respondeu = respondeu or link
+    abordado = abordado or respondeu
+    return {"captados": 1, "abordados": abordado, "responderam": respondeu, "link": link,
+            "clicou": clicou, "cadastrou": cadastrou}
+
+
+def linhas_hunter(registros):
+    """registros: (dia, cidade, categoria, canal, abordado, respondeu, link, clicou, cadastrou)."""
+    return BASE_HUNTER.agregar(
+        (dia, {"cidade": cidade or "sem cidade", "categoria": categoria or "sem categoria", "canal": _canal(canal)},
+         _etapas(*marcas)) for dia, cidade, categoria, canal, *marcas in registros)
+
+
+def linhas_demanda(registros):
+    return BASE_DEMANDA.agregar((dia, {"cidade": cidade or "sem cidade"}, {etapa: 1})
+                                for dia, cidade, etapa in registros)
+
+
 def _credenciais():
     env = {
         "host": os.environ.get("PF_DB_HOST"),
@@ -148,6 +220,10 @@ def coletar(conn):
         dados[bloco] = dict(zip(chaves, (_num(v) for v in cur.fetchone())))
     cur.execute(CONSULTA_DIARIO, {"teste": PERFIS_TESTE})
     dados["diario"] = [[d.isoformat(), *row] for d, *row in cur.fetchall()]
+    cur.execute(CONSULTA_HUNTER)
+    dados["hunter_linhas"] = cur.fetchall()
+    cur.execute(CONSULTA_DEMANDA, {"teste": PERFIS_TESTE})
+    dados["demanda_linhas"] = cur.fetchall()
     return dados
 
 
@@ -166,36 +242,59 @@ def por_semana(diario, hoje, colunas, n=10):
 
 
 def montar_painel(dados, agora):
-    e, a, p, r, h = (dados[k] for k in ("espacos", "anfitrioes", "procura", "reservas", "hunter"))
+    """Filtros no topo (periodo A/B, cidade, categoria, canal); anfitriao (Hunter) e demanda vivos;
+    espaco reservado para o produtor; depois a foto de hoje (espacos, planos, totais)."""
+    e, a, p, r = (dados[k] for k in ("espacos", "anfitrioes", "procura", "reservas"))
     hoje = agora.date()
-    painel = dp.Painel("Primeira Fila", "Primeira Fila · do espaco anunciado a reserva paga",
+    hl = linhas_hunter(dados.get("hunter_linhas", []))
+    dl = linhas_demanda(dados.get("demanda_linhas", []))
+    cidades = list(dict.fromkeys(BASE_HUNTER.opcoes(hl, "cidade") + BASE_DEMANDA.opcoes(dl, "cidade"))) or ["sem cidade"]
+    canais = BASE_HUNTER.opcoes(hl, "canal") or ["Sem envio"]
+    ctl = fl.controles(ABA, hoje, [fl.campo_lista("cidade", "Cidade", cidades, span=2),
+                                   fl.campo_lista("categoria", "Categoria (Hunter)",
+                                                  BASE_HUNTER.opcoes(hl, "categoria"), span=2),
+                                   fl.campo_lista("canal", "Canal (Hunter)", canais, todos=fl.TODOS)])
+    fh, fd = fl.Filtros(ctl, BASE_HUNTER), fl.Filtros(ctl, BASE_DEMANDA)
+    painel = dp.Painel(ABA, "Primeira Fila · do espaco captado a reserva paga",
                        f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco da Primeira Fila"
-                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe")
-    painel.linha(dp.Cartao("Espacos no ar", e["no_ar"]),
-                 dp.Cartao("Cliques em anuncios (30 dias)", p["cliques_30d"]),
-                 dp.Cartao("Reservas pagas", r["pagas"]),
-                 dp.Cartao("Valor pago", r["valor_pago"], dp.FMT_BRL))
-    painel.linha(dp.Funil("Organizadores: do clique a reserva", [
-                     ("Cliques em anuncios", p["cliques_total"]), ("Conversas no chat", p["conversas"]),
-                     ("Pedidos de reserva", p["pedidos_reserva"]), ("Reservas pagas", r["pagas"])],
-                     subtitulo="Desde o lancamento · % sobre os cliques"),
-                 dp.Funil("Hunter: da captacao ao cadastro", [
-                     ("Espacos captados", h["captados"]), ("Abordados no WhatsApp", h["abordados"]),
-                     ("Responderam", h["responderam"]), ("Cadastraram", h["cadastraram"])],
-                     subtitulo="Prospeccao da Automatize · % sobre os captados"))
-    painel.linha(dp.Serie("Cliques e pedidos por semana", ["Semana", "Cliques", "Pedidos de reserva"],
-                          por_semana(dados["diario"], hoje, [1, 2])),
-                 dp.Rosca("Espacos cadastrados", [("No ar", e["no_ar"]), ("Em revisao", e["em_revisao"]),
-                                                  ("Pausados ou ocultos",
-                                                   e["cadastrados"] - e["no_ar"] - e["em_revisao"])]))
-    painel.linha(dp.Serie("Anfitrioes e leads do Hunter por semana", ["Semana", "Perfis criados", "Leads do Hunter"],
-                          por_semana(dados["diario"], hoje, [3, 4])),
-                 dp.Rosca("Anfitrioes por plano", [("Rede", a["plano_rede"]), ("Basico", a["plano_basico"]),
-                                                   ("Sem plano", a["perfis"] - a["plano_rede"] - a["plano_basico"])]))
+                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · mude as células claras abaixo")
+    painel.linha(ctl)
+    painel.linha(fl.CartaoVivo("Hunter: espacos captados", fh.soma_p("captados", "A"), fh.soma_p("captados", "B")),
+                 fl.CartaoVivo("Hunter: cadastraram", fh.soma_p("cadastrou", "A"), fh.soma_p("cadastrou", "B")),
+                 fl.CartaoVivo("Cliques em anuncios", fd.soma_p("cliques", "A"), fd.soma_p("cliques", "B")),
+                 fl.CartaoVivo("Reservas pagas", fd.soma_p("pagas", "A"), fd.soma_p("pagas", "B")))
+    painel.linha(fl.FunilVivo("Anfitriao: Hunter da captacao ao cadastro (periodo A)", fh, FUNIL_HUNTER, altura=360,
+                              subtitulo="Espacos na data da captacao · etapas = estado de hoje"),
+                 fl.FunilVivo("Demanda: do clique a reserva paga (periodo A)", fd, FUNIL_DEMANDA, altura=360,
+                              subtitulo="Cada etapa na data em que aconteceu · so o filtro de cidade vale aqui"))
+    painel.linha(fl.comparacao_ab("Hunter: periodo A contra periodo B", fh, FUNIL_HUNTER))
+    painel.linha(fl.comparacao_ab("Demanda: periodo A contra periodo B", fd, FUNIL_DEMANDA))
+    painel.linha(fl.evolucao("Hunter: espacos captados no periodo A", fh, "captados", "canal", canais,
+                             subtitulo="Por dia ou semana, empilhado pelo canal da abordagem"),
+                 fl.evolucao("Demanda: cliques em anuncios no periodo A", fd, "cliques", "cidade", cidades[:6],
+                             subtitulo="Por dia ou semana, empilhado pelas 6 cidades com mais volume"))
+    recentes = hoje - datetime.timedelta(days=2 * fl.JANELA_PADRAO - 1)
+    painel.linha(fl.por_dimensao("Hunter por cidade (periodo A)", fh, "cidade",
+                                 BASE_HUNTER.opcoes(hl, "cidade", desde=recentes) or cidades[:1], [
+        ("Captados", "soma", "captados"), ("Abordados", "taxa", "abordados"), ("Responderam", "taxa", "responderam"),
+        ("Clicaram no link", "soma", "clicou"), ("Cadastraram", "soma", "cadastrou")],
+        gradiente=[1], cabecalho_dim="Cidade"))
+    painel.linha(dp.Tabela("Produtor (aguardando dado)", ["Etapa", "Situacao"], [
+        ["Disparos para produtores (SALIC, a partir de 16/11)", "A Automatize ainda nao registrou onde ficam"],
+        ["Resposta, cadastro e reserva do produtor", "Entra quando o registro existir"]]))
+    painel.linha(dp.Cartao("Espacos no ar (hoje)", e["no_ar"]), dp.Cartao("Anfitrioes (hoje)", a["perfis"]),
+                 dp.Cartao("Reservas pagas (desde o lancamento)", r["pagas"]),
+                 dp.Cartao("Valor pago (desde o lancamento)", r["valor_pago"], dp.FMT_BRL))
+    painel.linha(dp.Rosca("Espacos cadastrados (foto de hoje)", [
+                     ("No ar", e["no_ar"]), ("Em revisao", e["em_revisao"]),
+                     ("Pausados ou ocultos", e["cadastrados"] - e["no_ar"] - e["em_revisao"])]),
+                 dp.Rosca("Anfitrioes por plano (foto de hoje)", [
+                     ("Rede", a["plano_rede"]), ("Basico", a["plano_basico"]),
+                     ("Sem plano", a["perfis"] - a["plano_rede"] - a["plano_basico"])]))
     resumo = {"pf_espacos_no_ar": e["no_ar"], "pf_cliques_30d": p["cliques_30d"], "pf_cliques_total": p["cliques_total"],
               "pf_pedidos": p["pedidos_reserva"], "pf_reservas_pagas": r["pagas"], "pf_valor_pago": r["valor_pago"],
               "pf_anfitrioes": a["perfis"]}
-    return painel, resumo
+    return painel, resumo, [(BASE_HUNTER, hl), (BASE_DEMANDA, dl)]
 
 
 def main():
@@ -213,7 +312,7 @@ def main():
 
     tabs = {"raw_primeira_fila_diario": (HEADER_DIARIO, dados["diario"])}
     sync.pii_guard(tabs)
-    painel, resumo = montar_painel(dados, now)
+    painel, resumo, bases = montar_painel(dados, now)
 
     if args.dry_run:
         print("  resumo:", resumo)
@@ -224,6 +323,8 @@ def main():
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
     sync.write_overwrite(sh, "raw_primeira_fila_diario", HEADER_DIARIO, dados["diario"])
     svc = sync.build_sheets_service()
+    for base, linhas in bases:
+        base.publicar(sh, svc, sync.SPREADSHEET_ID, linhas)
     painel.publicar(sh, svc, sync.SPREADSHEET_ID)
     dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo, now)
     print("Primeira Fila: aba e raw atualizados.")
