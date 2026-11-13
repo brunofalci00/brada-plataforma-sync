@@ -22,19 +22,36 @@ def _componente(painel, titulo):
     return next(c for linha in painel.linhas for c in linha if getattr(c, "titulo", "") == titulo)
 
 
-def test_funis_de_organizador_e_hunter():
-    painel, resumo = pf.montar_painel(_dados(), AGORA)
-    org = _componente(painel, "Organizadores: do clique a reserva").etapas
-    hunter = _componente(painel, "Hunter: da captacao ao cadastro").etapas
-    assert org == [("Cliques em anuncios", 702), ("Conversas no chat", 4), ("Pedidos de reserva", 11),
-                   ("Reservas pagas", 0)]
-    assert hunter[1] == ("Abordados no WhatsApp", 4) and hunter[3] == ("Cadastraram", 1)
+D = datetime.date(2026, 11, 10)
+
+
+def test_hunter_etapas_cumulativas_e_rotulos_vazios():
+    linhas = pf.linhas_hunter([(D, None, "salao", "whatsapp", False, False, False, False, True),
+                               (D, None, "salao", None, False, False, False, False, False)])
+    por = {tuple(l[1:4]): l[4:] for l in linhas}
+    assert por[("sem cidade", "salao", "WhatsApp")] == [1, 1, 1, 1, 1, 1]
+    assert por[("sem cidade", "salao", "Sem envio")] == [1, 0, 0, 0, 0, 0]
+
+
+def test_demanda_conta_cada_etapa_no_seu_dia():
+    linhas = pf.linhas_demanda([(D, "Rio", "cliques"), (D, "Rio", "cliques"), (D, "Rio", "pagas")])
+    assert linhas == [[(D - datetime.date(1899, 12, 30)).days, "Rio", 2, 0, 0, 1]]
+
+
+def test_funis_vivos_e_bases_no_retorno():
+    dados = dict(_dados(), hunter_linhas=[(D, "Rio", "salao", "whatsapp", True, False, False, False, False)],
+                 demanda_linhas=[(D, "Rio", "cliques")])
+    painel, resumo, bases = pf.montar_painel(dados, AGORA)
+    titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
+    assert "Anfitriao: Hunter da captacao ao cadastro (periodo A)" in titulos
+    assert "Produtor (aguardando dado)" in titulos
+    assert [b.aba for b, _ in bases] == ["base_pf_hunter", "base_pf_demanda"]
     assert resumo["pf_cliques_total"] == 702
 
 
 def test_rosca_de_espacos_reparte_o_total():
-    painel, _ = pf.montar_painel(_dados(), AGORA)
-    fatias = dict(_componente(painel, "Espacos cadastrados").fatias)
+    painel, _, _ = pf.montar_painel(_dados(), AGORA)
+    fatias = dict(_componente(painel, "Espacos cadastrados (foto de hoje)").fatias)
     assert sum(fatias.values()) == 28 and fatias["Pausados ou ocultos"] == 5
 
 

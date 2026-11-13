@@ -16,6 +16,7 @@ import os
 import sync
 import dashboard_painel as dp
 import ga_analytics
+import painel_filtros as fl
 
 PROJETO = "brada-comunidade-c1ba5"
 DATABASE = "default"
@@ -192,29 +193,74 @@ def por_semana(linhas, hoje, n=10):
     return [[s.strftime("%d/%m"), *v] for s, v in cont.items()]
 
 
-def montar_painel(m, linhas, agora):
+ABA = "Comunidade"
+PERFIS = {"explorador": "Explorador", "idealizador": "Idealizador", "incentivador": "Incentivador",
+          "viabilizador": "Viabilizador"}
+BASE_COM = fl.Base("base_comunidade", [("perfil", "Perfil", fl.TODOS)], [
+    ("cadastros", "Cadastros"), ("perfis", "Perfis completos"), ("acoes", "Primeiras acoes")])
+ETAPAS_COM = [("Cadastros", "cadastros"), ("Perfis completos", "perfis"), ("Primeiras acoes", "acoes")]
+
+
+def _dia(v):
+    try:
+        return datetime.date.fromisoformat(_texto_data(v)[:10])
+    except ValueError:
+        return None
+
+
+def _perfil(papel):
+    return PERFIS.get(str(papel or "").strip().lower(), "Sem perfil")
+
+
+def linhas_base(dados):
+    """Cada evento na data em que aconteceu, pelo perfil. Os eventos nao trazem o membro, entao nao
+    da para seguir a mesma pessoa do cadastro a primeira acao: sao contagens do periodo, nao coorte."""
+    def registros():
+        for u in dados["users"]:
+            if not e_equipe(u):
+                yield _dia(u.get("createdAt")), {"perfil": _perfil(u.get("role"))}, {"cadastros": 1}
+        for e in dados["activation_events"]:
+            etapa = {"first_relevant_action": "acoes", "profile_completed": "perfis"}.get(e.get("event"))
+            if etapa:
+                yield _dia(e.get("timestamp")), {"perfil": _perfil(e.get("role"))}, {etapa: 1}
+    return BASE_COM.agregar(registros())
+
+
+def montar_painel(m, linhas, agora, base_linhas=()):
     ga = m.get("ga")
-    p = dp.Painel("Comunidade", "Comunidade Brada · da visita a rede",
+    base_linhas = list(base_linhas)
+    perfis = BASE_COM.opcoes(base_linhas, "perfil") or ["Sem perfil"]
+    ctl = fl.controles(ABA, agora.date(), [fl.campo_lista("perfil", "Perfil", perfis, todos=fl.TODOS, span=2)])
+    flt = fl.Filtros(ctl, BASE_COM)
+    p = dp.Painel(ABA, "Comunidade Brada · da visita a rede",
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore e Auth da Comunidade + Google Analytics"
-                  f" · sem as {m['equipe']} contas da equipe")
+                  f" · sem as {m['equipe']} contas da equipe · mude as células claras abaixo")
+    p.linha(ctl)
+    p.linha(fl.CartaoVivo("Cadastros", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
+            fl.CartaoVivo("Perfis completos", flt.soma_p("perfis", "A"), flt.soma_p("perfis", "B")),
+            fl.CartaoVivo("Primeiras acoes", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
+            fl.CartaoVivo("Primeiras acoes por cadastro", flt.taxa("acoes", "A"), flt.taxa("acoes", "B"),
+                          dp.FMT_PCT))
+    p.linha(fl.comparacao_ab("Periodo A contra periodo B (cada evento na data em que aconteceu)", flt, ETAPAS_COM))
+    p.linha(fl.evolucao("Cadastros no periodo A", flt, "cadastros", "perfil", perfis,
+                        subtitulo="Por dia ou semana, empilhado por perfil"),
+            fl.evolucao("Primeiras acoes no periodo A", flt, "acoes", "perfil", perfis,
+                        subtitulo="Por dia ou semana, empilhado por perfil"))
     p.linha(dp.Cartao("Visitantes (30 dias)", ga["ativos"] if ga else 0),
-            dp.Cartao("Membros", m["membros"]),
-            dp.Cartao("Cadastros no mes", m["cadastros_mes"]),
+            dp.Cartao("Membros (hoje)", m["membros"]),
+            dp.Cartao("Entraram em 30 dias", m["login_30d"]),
             dp.Cartao("Visitantes que voltaram", ga["taxa_retorno"] if ga else 0, dp.FMT_PCT))
-    p.linha(dp.Funil("Jornada do membro", [
+    p.linha(dp.Funil("Jornada do membro (foto de hoje, sem filtro)", [
                 ("Cadastraram", m["membros"]), ("Concluiram o onboarding", round(m["onboarding"] * m["membros"])),
                 ("Fizeram uma primeira acao", m["primeira_acao"])],
                 subtitulo="% sobre os membros", altura=320),
-            dp.Rosca("Perfis dos membros", [("Explorador", m["explorador"]), ("Idealizador", m["idealizador"]),
-                                            ("Incentivador", m["incentivador"]), ("Viabilizador", m["viabilizador"])],
-                     altura=320))
-    p.linha(dp.Serie("Cadastros e primeiras acoes por semana", ["Semana", "Cadastros", "Primeiras acoes"],
-                     por_semana(linhas, agora.date())),
-            dp.Serie("Rede e conteudo", ["Item", "Total"], [
-                ["Posts no feed", m["posts"]], ["Conexoes aceitas", m["conexoes_aceitas"]],
-                ["Mensagens diretas", m["mensagens"]], ["Noticias publicadas", m["noticias_publicadas"]],
-                ["Inscricoes em cursos", m["inscritos_cursos"]], ["Cliques em eventos", m["acao_evento"]]],
-                tipo="BAR"))
+            dp.Rosca("Perfis dos membros (foto de hoje)", [
+                ("Explorador", m["explorador"]), ("Idealizador", m["idealizador"]),
+                ("Incentivador", m["incentivador"]), ("Viabilizador", m["viabilizador"])], altura=320))
+    p.linha(dp.Serie("Rede e conteudo (total ate hoje)", ["Item", "Total"], [
+        ["Posts no feed", m["posts"]], ["Conexoes aceitas", m["conexoes_aceitas"]],
+        ["Mensagens diretas", m["mensagens"]], ["Noticias publicadas", m["noticias_publicadas"]],
+        ["Inscricoes em cursos", m["inscritos_cursos"]], ["Cliques em eventos", m["acao_evento"]]], tipo="BAR"))
     if ga and ga["top"]:
         p.linha(dp.Tabela("Telas mais vistas (30 dias)", ["Tela", "Visualizacoes"],
                           [[nome, vistas] for vistas, nome in ga["top"]], formatos=[None, dp.FMT_INT],
@@ -239,7 +285,8 @@ def main():
     linhas = diario(dados)
     tabs = {"raw_comunidade_diario": (HEADER_DIARIO, linhas)}
     sync.pii_guard(tabs)
-    painel, resumo = montar_painel(metricas, linhas, agora)
+    base_linhas = linhas_base(dados)
+    painel, resumo = montar_painel(metricas, linhas, agora, base_linhas)
 
     if args.dry_run:
         print("  resumo:", resumo)
@@ -250,6 +297,7 @@ def main():
     sh = gc.open_by_key(sync.SPREADSHEET_ID)
     sync.write_overwrite(sh, "raw_comunidade_diario", HEADER_DIARIO, linhas)
     svc = sync.build_sheets_service()
+    BASE_COM.publicar(sh, svc, sync.SPREADSHEET_ID, base_linhas)
     painel.publicar(sh, svc, sync.SPREADSHEET_ID)
     dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo, agora)
     print("Comunidade: aba e raw atualizados.")

@@ -75,10 +75,32 @@ def test_por_semana_soma_cadastros_e_acoes_na_semana_certa():
     assert semanas == {"02/11": (5, 1), "09/11": (1, 4)}
 
 
+def test_base_conta_cadastro_e_eventos_por_perfil_sem_equipe():
+    dados = {"users": [{"createdAt": "2026-11-10T10:00:00", "role": "idealizador"},
+                       {"createdAt": "2026-11-10T11:00:00", "role": "admin"}],
+             "activation_events": [{"event": "first_relevant_action", "timestamp": "2026-11-11T09:00:00",
+                                    "role": "idealizador"},
+                                   {"event": "profile_completed", "timestamp": "2026-11-11T09:00:00"},
+                                   {"event": "outro", "timestamp": "2026-11-11T09:00:00"}]}
+    linhas = sc.linhas_base(dados)
+    por = {(l[0], l[1]): l[2:] for l in linhas}
+    import painel_filtros as fl
+    d10, d11 = fl.serial(datetime.date(2026, 11, 10)), fl.serial(datetime.date(2026, 11, 11))
+    assert por[(d10, "Idealizador")] == [1, 0, 0]
+    assert por[(d11, "Idealizador")] == [0, 0, 1] and por[(d11, "Sem perfil")] == [0, 1, 0]
+
+
+def test_painel_comeca_pelos_controles():
+    m = sc.calcular(_dados(), AGORA)
+    painel, _ = sc.montar_painel(m, [], AGORA_DT, sc.linhas_base(_dados()))
+    import dashboard_painel as dp
+    assert isinstance(painel.linhas[0][0], dp.Controles)
+
+
 def test_painel_sem_ga_tem_jornada_que_nunca_sobe():
     m = sc.calcular(_dados(), AGORA)
     painel, resumo = sc.montar_painel(m, sc.diario(_dados()), AGORA_DT)
-    etapas = [v for _, v in _componente(painel, "Jornada do membro").etapas]
+    etapas = [v for _, v in _componente(painel, "Jornada do membro (foto de hoje, sem filtro)").etapas]
     assert etapas == sorted(etapas, reverse=True)
     assert resumo["comunidade_membros"] == 2 and "comunidade_visitantes_30d" not in resumo
 
