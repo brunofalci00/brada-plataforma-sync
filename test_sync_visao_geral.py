@@ -22,12 +22,12 @@ def _componente(painel, titulo):
     return next(c for linha in painel.linhas for c in linha if getattr(c, "titulo", "") == titulo)
 
 
-def test_conversao_dos_tres_sdrs():
+def test_visao_geral_enxuta_so_cartoes_e_funil_por_produto():
     painel, faltando = vg.montar_painel(_resumo(), AGORA)
-    conv = dict(_componente(painel, "Disparo ate o primeiro resultado").linhas)
     assert faltando == []
-    assert round(conv["Incentivador"], 4) == round(119 / 632, 4)
-    assert round(conv["Aptos"], 4) == round(59 / 1986, 4)
+    assert len(painel.linhas) == 2 and len(painel.linhas[0]) == 4
+    funil = painel.linhas[1][0]
+    assert funil.titulo == "Funil de cada produto" and len(funil.linhas) == len(vg.PRODUTOS)
 
 
 def test_receita_digital_soma_aprovai_e_primeira_fila():
@@ -52,9 +52,11 @@ def test_chave_ausente_vira_zero_e_e_reportada():
     assert linha[2] == 0 and linha[5] == 0
 
 
-def test_divisao_dos_disparos_entra_depois_dos_sdrs():
+def test_foto_da_capacidade_e_da_fila_vai_para_a_aba_brenda():
     import explorar_disparos as ex
-    blocos = ex.componentes_visao_geral([], {}, AGORA.date())
-    painel, _ = vg.montar_painel(_resumo(), AGORA, blocos)
-    assert painel.linhas[2][0].titulo == "Disparos da Brenda por semana"
-    assert painel.linhas[3][0].titulo == "Fila do alocador da Brenda hoje"
+    foto = ex.componentes_visao_geral([], {}, AGORA.date())
+    painel = ex.montar_painel([[46329, "Incentivador", "E-mail", "salic", 2, 2, 1, 0, 0, 0]], AGORA, foto)
+    titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
+    assert painel.aba == "Brenda"
+    assert titulos[-1] == "Fila do alocador hoje (sem filtro)"
+    assert "Capacidade da Brenda por semana (foto de hoje, sem filtro)" in titulos

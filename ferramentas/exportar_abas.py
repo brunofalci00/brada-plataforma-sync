@@ -11,7 +11,7 @@ OUT = os.path.join(__import__("tempfile").gettempdir(), "dashboard_abas_pdf")
 os.makedirs(OUT, exist_ok=True)
 creds = Credentials.from_service_account_file(sync.SHEETS_SA_FILE, scopes=["https://www.googleapis.com/auth/drive.readonly"])
 creds.refresh(Request())
-ABAS = {"visao_geral": 310463746, "explorar": 1691747693, "plataforma": 943913291, "aprovai": 1842609998,
+ABAS = {"visao_geral": 310463746, "brenda": 1691747693, "plataforma": 943913291, "aprovai": 1842609998,
         "incentivador": 774501113, "comunidade": 1826355523, "primeira_fila": 1376125764}
 alvo = sys.argv[1:] or list(ABAS)
 for nome in alvo:

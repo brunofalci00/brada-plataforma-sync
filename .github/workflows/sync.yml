@@ -111,8 +111,8 @@ jobs:
           fi
           python sync_comunidade.py
 
-      # Aba Explorar disparos: envios das 3 frentes agregados (sem PII) + filtros por formula.
-      - name: Explorar disparos -> Sheets
+      # Aba Brenda (antes Explorar disparos): envios das 3 frentes agregados (sem PII) + filtros por formula.
+      - name: Brenda (antes Explorar disparos) -> Sheets
         if: always()
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
