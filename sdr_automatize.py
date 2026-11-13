@@ -23,7 +23,8 @@ CONSULTA = """
     select lead_id, dia, canal,
            aberto_em is not null, clicou_em is not null, respondeu_em is not null,
            (visitou_agenda_em is not null or clicou_agendar_em is not null),
-           card_hubspot_em is not null, cadastro_em is not null, bounce_em is not null
+           coalesce(card_hubspot_em::date >= dia, false), coalesce(cadastro_em::date >= dia, false),
+           bounce_em is not null
     from dados.envios
     where modalidade = %s and coalesce(origem_evento, '') not like 'backfill%%'
 """
@@ -109,7 +110,8 @@ CONSULTA_FRENTES = """
     select modalidade, dia, canal, fonte_slug,
            aberto_em is not null, clicou_em is not null, respondeu_em is not null,
            (visitou_agenda_em is not null or clicou_agendar_em is not null),
-           card_hubspot_em is not null, cadastro_em is not null, bounce_em is not null
+           coalesce(card_hubspot_em::date >= dia, false), coalesce(cadastro_em::date >= dia, false),
+           bounce_em is not null
     from dados.envios
     where modalidade in (%s, %s, %s) and dia is not null
       and coalesce(origem_evento, '') not like 'backfill%%'

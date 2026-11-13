@@ -108,3 +108,5 @@ Secrets do repo (Settings -> Secrets and variables -> Actions):
 - Datas truncadas em America/Sao_Paulo (BRT) antes de virar `AAAA-MM-DD`.
 - Acesso = o MAIS RECENTE entre o `lastLogin` do doc em `users` e o `lastSignInTimestamp` do Firebase Auth (`sync.load_login_index`). O Auth sozinho so registra LOGIN, entao quem volta com a sessao viva congela nele: em 08/09/2026 isso dava 21 pessoas como paradas ha 30+ dias tendo acessado dentro da janela, e o `ativo_30d` da planilha marcava 49 em vez de 70.
 - `snap_diario` e a UNICA fonte de serie historica (Firestore so tem estado atual): rodar manual 1x/dia ate o cron subir.
+- Banco do SDR: `cadastro_em` e `card_hubspot_em` so contam quando caem no dia do envio ou depois. Em 13/11, 3 dos 4 "cadastros" da elaboracao e 5 dos 52 dos aprovados eram de quem ja tinha conta antes do e-mail.
+- Funil do site do AprovAI: `lead_captured` com CPF preenchido e invalido e teste e nao conta (o unico lead ate 13/11 tinha CPF 1234567890).

@@ -13,6 +13,8 @@ import analytics_contract as analytics
 import dashboard_painel as dp
 
 ABA = "Plataforma Brada"
+MESES = ("janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto",
+         "setembro", "outubro", "novembro", "dezembro")
 
 CANAIS = [("automatize", "Automatize"), ("leadlovers", "LeadLovers"), ("meta_ads", "Meta Ads"),
           ("instagram", "Instagram"), ("comercial", "Comercial"), ("site", "Site"), ("outro", "Outro"),
@@ -82,7 +84,7 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora):
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore da plataforma + banco do SDR Brada")
     p.linha(dp.Cartao("Projetos aptos a captar", m["proj_ativos"],
                       base=_valor_em(tendencia_rows, 1, ha_30), descricao_base="vs 30 dias atras"),
-            dp.Cartao("Cadastros novos no mes", m["novos_mes"]),
+            dp.Cartao(f"Cadastros em {MESES[hoje.month - 1]} (ate {hoje.strftime('%d/%m')})", m["novos_mes"]),
             dp.Cartao("Acessaram em 30 dias", m["ativos_30d"],
                       base=_valor_em(tendencia_rows, 2, ha_30), descricao_base="vs 30 dias atras"),
             dp.Cartao("Prazo vencido, a reativar", m["proj_a_reativar"]))
@@ -107,7 +109,8 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora):
 
     p.linha(dp.Serie("Aptos a captar e usuarios ativos", ["Dia", "Aptos a captar", "Ativos em 30 dias"],
                      _tendencia(tendencia_rows), tipo="LINE", rotulos=False, subtitulo="Ultimos 60 dias"),
-            dp.Serie("Cadastros novos por semana", ["Semana", "Cadastros"], m["semanas"]))
+            dp.Serie("ONGs que criaram conta, por semana", ["Semana de", "Contas novas"], m["semanas"],
+                     subtitulo="Sem migrados · semana de segunda a domingo · a ultima ainda esta em andamento"))
     canais = sorted(((rot, m["canais"].get(k, 0)) for k, rot in CANAIS), key=lambda x: -x[1])
     p.linha(dp.Serie("Origem dos cadastros novos", ["Canal", "Pessoas"], [[c, n] for c, n in canais if n],
                      tipo="BAR", subtitulo="Sem migrados, desde o lancamento"),
