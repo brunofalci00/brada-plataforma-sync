@@ -153,6 +153,48 @@ def coletar():
     }
 
 
+LOTE_COM_HISTORICO = 50  # batch/read com propertiesWithHistory recusa lote maior (400)
+
+
+def cards_ao_vivo(deal_ids):
+    """Estagio, dono, criacao e data em que entrou no estagio atual de cada card.
+
+    A data do estagio atual vem do historico de dealstage (o registro mais recente),
+    que o batch/read so devolve em lotes de ate 50."""
+    if not HUBSPOT_TOKEN or not deal_ids:
+        return {}
+    cards = {}
+    for i in range(0, len(deal_ids), LOTE_COM_HISTORICO):
+        resp = hs_post("https://api.hubapi.com/crm/v3/objects/deals/batch/read", {
+            "inputs": [{"id": d} for d in deal_ids[i:i + LOTE_COM_HISTORICO]],
+            "properties": ["dealstage", "hubspot_owner_id", "createdate"],
+            "propertiesWithHistory": ["dealstage"],
+        })
+        for r in resp.get("results", []):
+            p = r["properties"]
+            hist = r.get("propertiesWithHistory", {}).get("dealstage") or []
+            entrou = max((h["timestamp"] for h in hist), default=p.get("createdate"))
+            cards[r["id"]] = {"estagio": p.get("dealstage"), "dono": p.get("hubspot_owner_id") or "",
+                              "criado": p.get("createdate") or "", "entrou_estagio": entrou or ""}
+    return cards
+
+
+def nomes_donos():
+    """owner_id -> nome do executivo (funcionario da Brada, nao lead)."""
+    if not HUBSPOT_TOKEN:
+        return {}
+    out, after = {}, None
+    while True:
+        url = "https://api.hubapi.com/crm/v3/owners?limit=100" + (f"&after={after}" if after else "")
+        data = hs_get(url)
+        for o in data.get("results", []):
+            nome = " ".join(x for x in (o.get("firstName"), o.get("lastName")) if x).strip()
+            out[str(o["id"])] = nome or f"Dono {o['id']}"
+        after = (data.get("paging") or {}).get("next", {}).get("after")
+        if not after:
+            return out
+
+
 def estagios_ao_vivo(deal_ids):
     """Estagio ATUAL no HubSpot pra cada deal_id, em lotes de 100 (limite do batch/read)."""
     if not HUBSPOT_TOKEN or not deal_ids:
