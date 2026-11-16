@@ -50,3 +50,29 @@ def test_painel_e_resumo():
     assert "Do disparo ao ganho (periodo A)" in titulos and "Conversao por semana de disparo" not in titulos
     funil = next(c for linha in painel.linhas[1:] for c in linha if c.titulo == "Do disparo ao ganho (periodo A)")
     assert all(str(v).startswith("=") for linha in funil.bloco()[1:] for v in linha[1:])  # tudo vivo
+
+
+def test_por_executivo_conta_parados_avanco_e_sem_dono():
+    import datetime
+    import sync_incentivador as si
+    hoje = datetime.date(2026, 11, 16)
+    cards = {
+        "1": {"estagio": "appointmentscheduled", "dono": "", "criado": "2026-11-01", "entrou_estagio": "2026-11-01T10:00:00Z"},
+        "2": {"estagio": "appointmentscheduled", "dono": "9", "criado": "2026-11-14", "entrou_estagio": "2026-11-14T10:00:00Z"},
+        "3": {"estagio": "1246562476", "dono": "9", "criado": "2026-11-01", "entrou_estagio": "2026-11-05T10:00:00Z"},
+        "4": {"estagio": "closedlost", "dono": "9", "criado": "2026-10-01", "entrou_estagio": "2026-10-02T10:00:00Z"},
+    }
+    linhas = si.por_executivo(cards, {"9": "Ana"}, hoje)
+    assert linhas[0] == ["Ana", 3, 1, 0, 2, 1, 0, 1, 1 / 3]
+    assert linhas[1] == [si.SEM_DONO, 1, 1, 1, 15, 0, 0, 0, 0.0]
+
+
+def test_painel_com_executivos_mostra_tabela_de_cobranca():
+    import datetime
+    import sync_incentivador as si
+    hs = {"total_automatize": 1, "total_executivo": 2, "rows": []}
+    execs = [["Ana", 3, 1, 0, 2, 1, 0, 1, 1 / 3], [si.SEM_DONO, 1, 1, 1, 15, 0, 0, 0, 0.0]]
+    painel, _, _ = si.montar_painel({}, hs, datetime.datetime(2026, 11, 16, 9), execs)
+    titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
+    assert any(t.startswith("Cobranca por executivo") for t in titulos)
+    assert "Sem executivo dono" in titulos

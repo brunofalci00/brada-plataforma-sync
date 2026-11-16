@@ -72,13 +72,41 @@ def funil(leads):
     ]
 
 
+DIAS_PARADO = 7  # card em aberto ha mais que isso no mesmo estagio conta como parado
+SEM_DONO = "(sem dono)"
+CAB_EXECUTIVOS = ["Executivo", "Cards", "Em aberto", "Parados 7+ dias", "Dias parado",
+                  "Reuniao+", "Ganho", "Perdido", "Card ate reuniao"]
+
+
+def _data(iso):
+    return datetime.date.fromisoformat(iso[:10]) if iso else None
+
+
+def por_executivo(cards, nomes, hoje):
+    """Uma linha por dono do card: quanto recebeu, quanto esta parado e quanto avancou."""
+    grupos = {}
+    for c in cards.values():
+        dono = nomes.get(c["dono"], f"Dono {c['dono']}") if c["dono"] else SEM_DONO
+        grupos.setdefault(dono, []).append(c)
+    linhas = []
+    for dono, cs in grupos.items():
+        reuniao = sum(c["estagio"] in hub.BEYOND_REUNIAO for c in cs)
+        perdido = sum(c["estagio"] == "closedlost" for c in cs)
+        abertos = [c for c in cs if c["estagio"] not in hub.BEYOND_REUNIAO and c["estagio"] != "closedlost"]
+        dias = sorted((hoje - _data(c["entrou_estagio"])).days for c in abertos if c["entrou_estagio"])
+        mediana = dias[len(dias) // 2] if dias else ""
+        linhas.append([dono, len(cs), len(abertos), sum(d > DIAS_PARADO for d in dias), mediana, reuniao,
+                       sum(c["estagio"] in hub.GANHO_OU_ALEM for c in cs), perdido, reuniao / len(cs)])
+    return sorted(linhas, key=lambda r: (-r[1], r[0]))
+
+
 def pipeline_hubspot(hs):
     rows = hs["rows"]
     return [["Automatize", hs["total_automatize"], sum(1 for r in rows if r[2] == "Automatize")],
             ["Executivo Brada", hs["total_executivo"], sum(1 for r in rows if r[2] == "Executivo Brada")]]
 
 
-def montar_painel(leads, hs, agora):
+def montar_painel(leads, hs, agora, executivos=()):
     """Filtros no topo (periodo A/B, canal, fonte), funil do disparo ao ganho e a foto do pipeline."""
     linhas = linhas_base(leads)
     fontes = BASE.opcoes(linhas, "fonte")
@@ -105,6 +133,15 @@ def montar_painel(leads, hs, agora):
                 ("Sem resposta", F(f"{d}-{e}")), ("Engajou sem agenda", F(f"{e}-{ag}")),
                 ("Agenda sem card", F(f"{ag}-{c}")), ("Card sem reuniao", F(f"{c}-{r}")),
                 ("Reuniao ou alem", F(r))], altura=360))
+    if executivos:
+        cards = sum(r[1] for r in executivos)
+        sem_dono = next((r[1] for r in executivos if r[0] == SEM_DONO), 0)
+        p.linha(dp.Cartao("Cards da Brenda no HubSpot", cards),
+                dp.Cartao("Sem executivo dono", sem_dono),
+                dp.Cartao(f"Em aberto parados {DIAS_PARADO}+ dias", sum(r[3] for r in executivos)),
+                dp.Cartao("Card ate reuniao", sum(r[5] for r in executivos) / cards if cards else 0, formato=dp.FMT_PCT))
+        p.linha(dp.Tabela("Cobranca por executivo: cards da Brenda (foto de hoje, sem filtro)", CAB_EXECUTIVOS,
+                          executivos, formatos=[None] + [dp.FMT_INT] * 7 + [dp.FMT_PCT], gradiente=[3]))
     p.linha(fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO))
     p.linha(fl.evolucao("Leads disparados no periodo A", flt, "disparados", "canal", canais,
                         subtitulo="Por dia ou semana (filtro 'Agrupar por'), empilhado por canal"))
@@ -139,8 +176,8 @@ def coletar():
         cards_por_lead = {str(lead): deal for lead, deal in cur.fetchall()}
     finally:
         conn.close()
-    estagios = hub.estagios_ao_vivo(list(cards_por_lead.values()))
-    return envios, cards_por_lead, estagios
+    cards = hub.cards_ao_vivo(list(cards_por_lead.values()))
+    return envios, cards_por_lead, cards
 
 
 def main():
@@ -152,8 +189,12 @@ def main():
 
     agora = datetime.datetime.now(sync.BRT)
     print("Banco do SDR Brada (so incentivador) + estagios ao vivo...")
-    envios, cards_por_lead, estagios = coletar()
+    envios, cards_por_lead, cards = coletar()
+    estagios = {d: c["estagio"] for d, c in cards.items()}
     leads = completar(sdra.por_lead(envios), cards_por_lead, estagios)
+    executivos = por_executivo(cards, hub.nomes_donos(), agora.date())
+    for r in executivos:
+        print("  ", r)
     print("  funil:", funil(leads))
     print("Pipeline Incentivador no HubSpot...")
     hs = hub.coletar()
@@ -163,7 +204,7 @@ def main():
             "raw_hubspot_incentivador": (hub.HEADER_RAW, hs["rows"])}
     sync.pii_guard(tabs)
     print("pii_guard: OK (zero hits)")
-    painel, resumo, linhas = montar_painel(leads, hs, agora)
+    painel, resumo, linhas = montar_painel(leads, hs, agora, executivos)
 
     if args.dry_run:
         print("--dry-run: nada escrito.", resumo)
