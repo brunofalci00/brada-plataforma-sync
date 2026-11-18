@@ -19,16 +19,17 @@ ABA = "Visão Geral"
 PRODUTOS = [
     ("SDR Incentivador", "disparo > card > reuniao",
      "incentivador_disparados", "incentivador_cards", "incentivador_reuniao"),
-    ("SDR Elaboracao", "disparo > cadastro > assinante",
-     "elaboracao_disparados", "elaboracao_cadastros", "aprovai_assinantes"),
+    # O assinante do AprovAI nao vem do disparo: o SDR de elaboracao termina no cadastro.
+    ("SDR Elaboracao", "disparo > cadastro", "elaboracao_disparados", None, "elaboracao_cadastros"),
     ("SDR Aptos", "disparo > cadastro > apto",
      "aptos_sdr_disparados", "aptos_sdr_cadastros", "aptos_sdr_aptos"),
     ("Plataforma (novos)", "cadastro > apto",
      "plataforma_novos_cadastros", None, "plataforma_novos_aptos"),
-    ("Comunidade", "visita > membro > acao",
+    ("Comunidade", "visitante 30d > membro > acao",
      "comunidade_visitantes_30d", "comunidade_membros", "comunidade_primeira_acao"),
     ("AprovAI (app)", "visita > lead > assinante", "aprovai_visitas", "aprovai_leads", "aprovai_assinantes"),
-    ("Primeira Fila", "clique > pedido > paga", "pf_cliques_total", "pf_pedidos", "pf_reservas_pagas"),
+    ("Primeira Fila", "visita > pagina de espaco > paga (desde 17/11)",
+     "pf_jornada_visitas", "pf_jornada_pag_espaco", "pf_reservas_pagas"),
 ]
 SDRS = [("Incentivador", "incentivador_disparados", "incentivador_cards"),
         ("Elaboracao", "elaboracao_disparados", "elaboracao_cadastros"),

@@ -252,9 +252,9 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
                          [[F(flt.sequencia()), F(flt.por_ponto("acoes", perfil=False))]],
                          n_linhas=fl.MAX_PONTOS, formato_dominio=dp.FMT_DIA, rotulos=False, altura=320,
                          subtitulo="Por dia ou semana · todos os perfis (o evento ainda nao traz o perfil)"))
-    p.linha(dp.Cartao("Visitantes (30 dias)", ga["ativos"] if ga else 0),
-            dp.Cartao("Membros (hoje)", m["membros"]),
-            dp.Cartao("Entraram em 30 dias", m["login_30d"]),
+    # Visitas ficam no bloco do GA4 (com periodo); aqui so o estado dos membros.
+    p.linha(dp.Cartao("Membros (hoje)", m["membros"]),
+            dp.Cartao("Membros que acessaram em 30 dias", m["login_30d"]),
             dp.Cartao("Visitantes que voltaram", ga["taxa_retorno"] if ga else 0, dp.FMT_PCT))
     p.linha(dp.Funil("Jornada do membro (foto de hoje, sem filtro)", [
                 ("Cadastraram", m["membros"]), ("Concluiram o onboarding", round(m["onboarding"] * m["membros"])),
