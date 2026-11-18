@@ -199,6 +199,11 @@ def linhas_demanda(registros):
                                 for dia, cidade, etapa in registros)
 
 
+def _total(linhas, base, etapa):
+    i = base.cabecalho.index(dict(base.etapas)[etapa])
+    return sum(l[i] for l in linhas)
+
+
 def etapa_pagina(caminho):
     """Classifica a pagina do GA4 numa etapa da jornada (None = fora)."""
     base, _, query = caminho.partition("?")
@@ -353,7 +358,9 @@ def montar_painel(dados, agora, web=None):
                      ("Sem plano", a["perfis"] - a["plano_rede"] - a["plano_basico"])]))
     resumo = {"pf_espacos_no_ar": e["no_ar"], "pf_cliques_30d": p["cliques_30d"], "pf_cliques_total": p["cliques_total"],
               "pf_pedidos": p["pedidos_reserva"], "pf_reservas_pagas": r["pagas"], "pf_valor_pago": r["valor_pago"],
-              "pf_anfitrioes": a["perfis"]}
+              "pf_anfitrioes": a["perfis"],
+              "pf_jornada_visitas": _total(jl, BASE_JORNADA, "visitas"),
+              "pf_jornada_pag_espaco": _total(jl, BASE_JORNADA, "pag_espaco")}
     extras = []
     if web is not None:
         web_visitas.blocos(painel, ctl, "pf", web)
