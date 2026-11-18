@@ -119,6 +119,21 @@ def _ga(sessao, prop):
     return out
 
 
+def _paginas(sessao, prop):
+    """[(dia, caminho_sem_query, aba_da_query, sessoes)] dos ultimos 120 dias, fora de dev."""
+    corpo = {"dateRanges": [{"startDate": "120daysAgo", "endDate": "today"}],
+             "dimensions": [{"name": "date"}, {"name": "pagePathPlusQueryString"}, {"name": "hostName"}],
+             "metrics": [{"name": "sessions"}], "limit": 100000}
+    r = _post(sessao, ga_analytics.URL_RELATORIO.format(prop), corpo)
+    out = []
+    for row in r.json().get("rows", []):
+        d, caminho, host = (x["value"] for x in row["dimensionValues"])
+        if host.endswith(".run.app") or host in ("localhost", ""):
+            continue
+        out.append((datetime.datetime.strptime(d, "%Y%m%d").date(), caminho, int(float(row["metricValues"][0]["value"]))))
+    return out
+
+
 def _gsc(sessao, cfg, inicio, fim, dimensoes, limite=25000):
     corpo = {"startDate": inicio.isoformat(), "endDate": fim.isoformat(), "dimensions": dimensoes,
              "rowLimit": limite}
@@ -136,9 +151,10 @@ def coletar(slug, hoje, creds=None):
     from google.auth.transport.requests import AuthorizedSession
     cfg = PRODUTOS[slug]
     sessao = AuthorizedSession(creds or credenciais())
-    dados = {"ga": [], "gsc": [], "top": [], "erros": []}
+    dados = {"ga": [], "gsc": [], "top": [], "paginas": [], "erros": []}
     try:
         dados["ga"] = _ga(sessao, cfg["ga"])
+        dados["paginas"] = _paginas(sessao, cfg["ga"])
     except Exception as erro:  # noqa: BLE001 - aba sai sem o bloco de visitas
         dados["erros"].append(f"GA4: {erro}")
     try:
