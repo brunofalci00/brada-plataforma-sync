@@ -34,10 +34,10 @@ def test_resto_oculto_fecha_o_total_do_dia():
 
 
 def test_blocos_viram_bases_e_linhas_vivas():
-    dados = {"ga": [(D, "Direto", [3, 2, 1])], "gsc": [(D, "Generica", 10, 1, 5.0)],
+    dados = {"ga": [(D, "Direto", [3, 2, 1, 1])], "gsc": [(D, "Generica", 10, 1, 5.0)],
              "top": [["espaco para festa", 10, 1, 5.0, "Generica"]], "erros": []}
     (bv, lv), (bb, lb) = w.linhas_bases("pf", dados)
-    assert lv[0][1:] == ["Direto", 3, 2, 1] and lb[0][1:] == ["Generica", 10, 1, 500]
+    assert lv[0][1:] == ["Direto", 3, 2, 1, 1] and lb[0][1:] == ["Generica", 10, 1, 500]
     ctl = fl.controles("Primeira Fila", D)
     p = dp.Painel("Primeira Fila", "t", "s")
     w.blocos(p, ctl, "pf", dados)
