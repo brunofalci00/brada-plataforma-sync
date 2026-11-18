@@ -134,6 +134,13 @@ CONSULTA_DEMANDA = BASE + f"""
       join espacos_reais e on e.id = r.venue_id
       where r.pagamento_status = 'pago' and r.status <> 'cancelada' and r.pago_em is not null"""
 
+# Lado anfitriao da jornada: perfil criado, espaco cadastrado e espaco no guia (estado de hoje, na data do cadastro).
+CONSULTA_ANFITRIAO = BASE + f"""
+    select (created_at at time zone '{TZ}')::date, null, 'perfis' from perfis_reais
+    union all select (created_at at time zone '{TZ}')::date, cidade, 'espacos' from espacos_reais
+    union all select (created_at at time zone '{TZ}')::date, cidade, 'no_guia' from espacos_reais
+      where revisao_status = 'publicado' and not coalesce(pausado, false) and not coalesce(revisao_oculto, false)"""
+
 ABA = "Primeira Fila"
 BASE_HUNTER = fl.Base("base_pf_hunter", [("cidade", "Cidade", fl.TODAS), ("categoria", "Categoria", fl.TODAS),
                                          ("canal", "Canal", fl.TODOS)], [
@@ -146,6 +153,20 @@ BASE_DEMANDA = fl.Base("base_pf_demanda", [("cidade", "Cidade", fl.TODAS)], [
     ("pagas", "Reservas pagas")])
 FUNIL_DEMANDA = [("Cliques em anuncios", "cliques"), ("Conversas no chat", "conversas"),
                  ("Pedidos de reserva", "pedidos"), ("Reservas pagas", "pagas")]
+# Jornada ponta a ponta: visitas e paginas vem do GA4 (sem cidade), o resto do banco.
+BASE_JORNADA = fl.Base("base_pf_jornada", [("cidade", "Cidade", fl.TODAS)], [
+    ("visitas", "Visitas ao site"), ("pag_espaco", "Sessoes em pagina de espaco"),
+    ("pag_cadastro", "Sessoes no criar conta"), ("perfis", "Perfis de anfitriao"),
+    ("espacos", "Espacos cadastrados"), ("no_guia", "Espacos no guia hoje"), ("cliques", "Cliques em anuncios"),
+    ("conversas", "Conversas"), ("pedidos", "Pedidos de reserva"), ("pagas", "Reservas pagas")])
+JORNADA_ANFITRIAO = [("Visitas ao site", "visitas"), ("Viram pagina de espaco", "pag_espaco"),
+                     ("Abriram o criar conta", "pag_cadastro"), ("Perfis de anfitriao", "perfis"),
+                     ("Espacos cadastrados", "espacos"), ("Espacos no guia hoje", "no_guia")]
+JORNADA_PRODUTOR = [("Visitas ao site", "visitas"), ("Viram pagina de espaco", "pag_espaco"),
+                    ("Conversas no chat", "conversas"),
+                    ("Pedidos de reserva", "pedidos"), ("Reservas pagas", "pagas")]
+# Em 16/11 o clique em anuncio passou a contar 1 por navegador, por espaco, por dia: a serie cai por metodo.
+MUDANCA_CLIQUES = "16/11"
 CANAIS = {"whatsapp": "WhatsApp", "email": "E-mail", "e-mail": "E-mail", "instagram": "Instagram"}
 
 
@@ -175,6 +196,28 @@ def linhas_hunter(registros):
 def linhas_demanda(registros):
     return BASE_DEMANDA.agregar((dia, {"cidade": cidade or "sem cidade"}, {etapa: 1})
                                 for dia, cidade, etapa in registros)
+
+
+def etapa_pagina(caminho):
+    """Classifica a pagina do GA4 numa etapa da jornada (None = fora)."""
+    base, _, query = caminho.partition("?")
+    if base.startswith("/espacos/PF-"):
+        return "pag_espaco"
+    if base == "/conta" and "aba=criar" in query:
+        return "pag_cadastro"
+    return None
+
+
+def linhas_jornada(anfitriao, demanda, web):
+    """anfitriao/demanda: (dia, cidade, etapa) do banco; web: dados do web_visitas (pode faltar)."""
+    regs = [(dia, {"cidade": cidade or "sem cidade"}, {etapa: 1}) for dia, cidade, etapa in list(anfitriao) + list(demanda)]
+    web = web or {}
+    regs += [(dia, {"cidade": "sem cidade"}, {"visitas": m[0]}) for dia, _, m in web.get("ga", [])]
+    for dia, caminho, sessoes in web.get("paginas", []):
+        etapa = etapa_pagina(caminho)
+        if etapa:
+            regs.append((dia, {"cidade": "sem cidade"}, {etapa: sessoes}))
+    return BASE_JORNADA.agregar(regs)
 
 
 def _credenciais():
@@ -255,15 +298,24 @@ def montar_painel(dados, agora, web=None):
                                    fl.campo_lista("categoria", "Categoria (Hunter)",
                                                   BASE_HUNTER.opcoes(hl, "categoria"), span=2),
                                    fl.campo_lista("canal", "Canal (Hunter)", canais, todos=fl.TODOS)])
-    fh, fd = fl.Filtros(ctl, BASE_HUNTER), fl.Filtros(ctl, BASE_DEMANDA)
+    jl = linhas_jornada(dados.get("anfitriao_linhas", []), dados.get("demanda_linhas", []), web)
+    fh, fd, fj = fl.Filtros(ctl, BASE_HUNTER), fl.Filtros(ctl, BASE_DEMANDA), fl.Filtros(ctl, BASE_JORNADA)
     painel = dp.Painel(ABA, "Primeira Fila · do espaco captado a reserva paga",
                        f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco da Primeira Fila"
                        f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · mude as células claras abaixo")
     painel.linha(ctl)
     painel.linha(fl.CartaoVivo("Hunter: espacos captados", fh.soma_p("captados", "A"), fh.soma_p("captados", "B")),
                  fl.CartaoVivo("Hunter: cadastraram", fh.soma_p("cadastrou", "A"), fh.soma_p("cadastrou", "B")),
-                 fl.CartaoVivo("Cliques em anuncios", fd.soma_p("cliques", "A"), fd.soma_p("cliques", "B")),
+                 fl.CartaoVivo(f"Cliques em anuncios (metodo mudou em {MUDANCA_CLIQUES})", fd.soma_p("cliques", "A"),
+                               fd.soma_p("cliques", "B")),
                  fl.CartaoVivo("Reservas pagas", fd.soma_p("pagas", "A"), fd.soma_p("pagas", "B")))
+    aviso = "Visitas e paginas: GA4 desde 17/11, so com Cidade = Todas"
+    painel.linha(fl.FunilVivo("Jornada do anfitriao: da visita ao espaco no guia (periodo A)", fj, JORNADA_ANFITRIAO,
+                              altura=380, subtitulo=aviso),
+                 fl.FunilVivo("Jornada do produtor: da visita a reserva paga (periodo A)", fj, JORNADA_PRODUTOR,
+                              altura=380, subtitulo=aviso))
+    painel.linha(fl.comparacao_ab("Jornada do anfitriao: periodo A contra periodo B", fj, JORNADA_ANFITRIAO))
+    painel.linha(fl.comparacao_ab("Jornada do produtor: periodo A contra periodo B", fj, JORNADA_PRODUTOR))
     painel.linha(fl.FunilVivo("Anfitriao: Hunter da captacao ao cadastro (periodo A)", fh, FUNIL_HUNTER, altura=360,
                               subtitulo="Espacos na data da captacao · etapas = estado de hoje"),
                  fl.FunilVivo("Demanda: do clique a reserva paga (periodo A)", fd, FUNIL_DEMANDA, altura=360,
@@ -299,7 +351,7 @@ def montar_painel(dados, agora, web=None):
     if web is not None:
         web_visitas.blocos(painel, ctl, "pf", web)
         extras = web_visitas.linhas_bases("pf", web)
-    return painel, resumo, [(BASE_HUNTER, hl), (BASE_DEMANDA, dl)] + extras
+    return painel, resumo, [(BASE_HUNTER, hl), (BASE_DEMANDA, dl), (BASE_JORNADA, jl)] + extras
 
 
 def main():

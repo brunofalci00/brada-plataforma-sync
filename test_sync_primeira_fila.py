@@ -45,7 +45,7 @@ def test_funis_vivos_e_bases_no_retorno():
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
     assert "Anfitriao: Hunter da captacao ao cadastro (periodo A)" in titulos
     assert "Produtor (aguardando dado)" in titulos
-    assert [b.aba for b, _ in bases] == ["base_pf_hunter", "base_pf_demanda"]
+    assert [b.aba for b, _ in bases] == ["base_pf_hunter", "base_pf_demanda", "base_pf_jornada"]
     assert resumo["pf_cliques_total"] == 702
 
 
@@ -59,3 +59,28 @@ def test_por_semana_soma_colunas_pedidas():
     diario = [["2026-11-03", 10, 1, 2, 0], ["2026-11-09", 5, 0, 1, 3], ["2026-11-10", 7, 2, 0, 0]]
     semanas = pf.por_semana(diario, AGORA.date(), [1, 2], n=2)
     assert semanas == [["02/11", 10, 1], ["09/11", 12, 2]]  # 09/11/2026 e segunda-feira
+
+
+def test_etapa_pagina_classifica_espaco_e_criar_conta():
+    import sync_primeira_fila as pf
+    assert pf.etapa_pagina("/espacos/PF-2026-2180") == "pag_espaco"
+    assert pf.etapa_pagina("/conta?aba=criar&plano=rede") == "pag_cadastro"
+    assert pf.etapa_pagina("/espacos") is None
+    assert pf.etapa_pagina("/conta") is None
+
+
+def test_linhas_jornada_junta_ga4_e_banco_no_mesmo_dia():
+    import datetime
+    import sync_primeira_fila as pf
+    d = datetime.date(2026, 11, 17)
+    web = {"ga": [(d, "Direto", [5, 2, 3]), (d, "Google organico", [2, 1, 1])],
+           "paginas": [(d, "/espacos/PF-1", 3), (d, "/conta?aba=criar", 1), (d, "/", 9)]}
+    linhas = pf.linhas_jornada([(d, None, "perfis"), (d, "Sao Paulo", "espacos")], [(d, "Sao Paulo", "cliques")], web)
+    cab = pf.BASE_JORNADA.cabecalho
+    sem = next(l for l in linhas if l[1] == "sem cidade")
+    sp = next(l for l in linhas if l[1] == "Sao Paulo")
+    assert sem[cab.index("Visitas ao site")] == 7
+    assert sem[cab.index("Sessoes em pagina de espaco")] == 3
+    assert sem[cab.index("Sessoes no criar conta")] == 1
+    assert sem[cab.index("Perfis de anfitriao")] == 1
+    assert sp[cab.index("Espacos cadastrados")] == 1 and sp[cab.index("Cliques em anuncios")] == 1
