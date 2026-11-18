@@ -15,6 +15,7 @@ import os
 import sync
 import dashboard_painel as dp
 import painel_filtros as fl
+import pf_cruzamentos
 import web_visitas
 
 SECRETS_FILE = os.path.expanduser("~/.brada-secrets/automatize-primeira-fila-dados.env")
@@ -217,7 +218,8 @@ def linhas_jornada(anfitriao, demanda, web):
         etapa = etapa_pagina(caminho)
         if etapa:
             regs.append((dia, {"cidade": "sem cidade"}, {etapa: sessoes}))
-    return BASE_JORNADA.agregar(regs)
+    inicio = web_visitas.PRODUTOS["pf"]["desde"]
+    return BASE_JORNADA.agregar(r for r in regs if r[0] and r[0] >= inicio)
 
 
 def _credenciais():
@@ -268,6 +270,10 @@ def coletar(conn):
     dados["hunter_linhas"] = cur.fetchall()
     cur.execute(CONSULTA_DEMANDA, {"teste": PERFIS_TESTE})
     dados["demanda_linhas"] = cur.fetchall()
+    cur.execute(CONSULTA_ANFITRIAO, {"teste": PERFIS_TESTE})
+    dados["anfitriao_linhas"] = cur.fetchall()
+    cur.execute(BASE + pf_cruzamentos.CONSULTA_OFERTA, {"teste": PERFIS_TESTE})
+    dados["oferta_local"] = cur.fetchall()
     return dados
 
 
@@ -309,7 +315,7 @@ def montar_painel(dados, agora, web=None):
                  fl.CartaoVivo(f"Cliques em anuncios (metodo mudou em {MUDANCA_CLIQUES})", fd.soma_p("cliques", "A"),
                                fd.soma_p("cliques", "B")),
                  fl.CartaoVivo("Reservas pagas", fd.soma_p("pagas", "A"), fd.soma_p("pagas", "B")))
-    aviso = "Visitas e paginas: GA4 desde 17/11, so com Cidade = Todas"
+    aviso = "Conta so a partir de 17/11, quando o GA4 comecou · com Cidade = Todas"
     painel.linha(fl.FunilVivo("Jornada do anfitriao: da visita ao espaco no guia (periodo A)", fj, JORNADA_ANFITRIAO,
                               altura=380, subtitulo=aviso),
                  fl.FunilVivo("Jornada do produtor: da visita a reserva paga (periodo A)", fj, JORNADA_PRODUTOR,
@@ -332,6 +338,7 @@ def montar_painel(dados, agora, web=None):
         ("Captados", "soma", "captados"), ("Abordados", "taxa", "abordados"), ("Responderam", "taxa", "responderam"),
         ("Clicaram no link", "soma", "clicou"), ("Cadastraram", "soma", "cadastrou")],
         gradiente=[1], cabecalho_dim="Cidade"))
+    pf_cruzamentos.blocos(painel, fh, canais, dados.get("oferta_local", []), (web or {}).get("consultas", []))
     painel.linha(dp.Tabela("Produtor (aguardando dado)", ["Etapa", "Situacao"], [
         ["Disparos para produtores (SALIC, a partir de 16/11)", "A Automatize ainda nao registrou onde ficam"],
         ["Resposta, cadastro e reserva do produtor", "Entra quando o registro existir"]]))

@@ -151,7 +151,7 @@ def coletar(slug, hoje, creds=None):
     from google.auth.transport.requests import AuthorizedSession
     cfg = PRODUTOS[slug]
     sessao = AuthorizedSession(creds or credenciais())
-    dados = {"ga": [], "gsc": [], "top": [], "paginas": [], "erros": []}
+    dados = {"ga": [], "gsc": [], "top": [], "paginas": [], "consultas": [], "erros": []}
     try:
         dados["ga"] = _ga(sessao, cfg["ga"])
         dados["paginas"] = _paginas(sessao, cfg["ga"])
@@ -163,7 +163,8 @@ def coletar(slug, hoje, creds=None):
                      for r in _gsc(sessao, cfg, INICIO_GSC, hoje, ["date", "query"])]
         totais = _gsc(sessao, cfg, INICIO_GSC, hoje, ["date"])
         dados["gsc"] = por_busca + resto_oculto(por_busca, totais)
-        top = _gsc(sessao, cfg, hoje - datetime.timedelta(days=DIAS_TOP), hoje, ["query"], TOP_BUSCAS * 3)
+        top = _gsc(sessao, cfg, hoje - datetime.timedelta(days=DIAS_TOP), hoje, ["query"], 5000)
+        dados["consultas"] = [(r["keys"][0], r["impressions"], r["clicks"]) for r in top]
         dados["top"] = [[r["keys"][0], r["impressions"], r["clicks"], round(r["position"], 1),
                          tipo_busca(r["keys"][0], cfg["marca"])] for r in sorted(top, key=lambda r: -r["impressions"]) if fl.seguro(r["keys"][0])][:TOP_BUSCAS]
     except Exception as erro:  # noqa: BLE001
