@@ -166,6 +166,14 @@ def ultimo_disparo(lista):
     return max(dias) if dias else None
 
 
+def dias_uteis_sem_envio(ultimo, hoje):
+    """Dias uteis (seg-sex) depois do ultimo envio ate hoje, inclusive."""
+    if not ultimo:
+        return None
+    return sum(1 for i in range(1, (hoje - ultimo).days + 1)
+               if (ultimo + datetime.timedelta(days=i)).weekday() < 5)
+
+
 def coorte(leads, hoje, etapas, n=10):
     """Uma linha por semana do primeiro disparo: [semana, n, etapa1, etapa2, ..., taxa da ultima]."""
     linhas = []

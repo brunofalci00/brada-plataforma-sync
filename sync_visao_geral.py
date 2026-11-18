@@ -15,20 +15,24 @@ import dashboard_painel as dp
 
 ABA = "Visão Geral"
 
-# (produto, etapas, chave do comeco, do meio, do fim)
+# (publico, produto, etapas, chave do comeco, do meio, do fim). Agrupado pelos 3 publicos, que nao se
+# misturam; cada funil tem a propria profundidade, entao nao ha gradiente comparando um com o outro.
 PRODUTOS = [
-    ("SDR Incentivador", "disparo > card > reuniao",
-     "incentivador_disparados", "incentivador_cards", "incentivador_reuniao"),
-    # O assinante do AprovAI nao vem do disparo: o SDR de elaboracao termina no cadastro.
-    ("SDR Elaboracao", "disparo > cadastro", "elaboracao_disparados", None, "elaboracao_cadastros"),
-    ("SDR Aptos", "disparo > cadastro > apto",
+    # O card do Incentivador nasce sozinho ao abrir a agenda (robo): o meio e quem clicou ou respondeu.
+    ("Incentivador", "SDR Incentivador", "disparo > clicou ou respondeu > reuniao",
+     "incentivador_disparados", "incentivador_engajaram", "incentivador_reuniao"),
+    ("Proponente da plataforma", "SDR Aptos", "disparo > cadastro > apto",
      "aptos_sdr_disparados", "aptos_sdr_cadastros", "aptos_sdr_aptos"),
-    ("Plataforma (novos)", "cadastro > apto",
+    ("Proponente da plataforma", "Plataforma (novos, todas as origens)", "cadastro > apto",
      "plataforma_novos_cadastros", None, "plataforma_novos_aptos"),
-    ("Comunidade", "visitante 30d > membro > acao",
+    # O assinante do AprovAI nao vem do disparo: o SDR de elaboracao termina no cadastro.
+    ("Proponente de elaboracao", "SDR Elaboracao", "disparo > cadastro", "elaboracao_disparados", None,
+     "elaboracao_cadastros"),
+    ("Proponente de elaboracao", "AprovAI (app)", "visita > lead > assinante", "aprovai_visitas", "aprovai_leads",
+     "aprovai_assinantes"),
+    ("Outros", "Comunidade", "visitante 30d > membro > acao",
      "comunidade_visitantes_30d", "comunidade_membros", "comunidade_primeira_acao"),
-    ("AprovAI (app)", "visita > lead > assinante", "aprovai_visitas", "aprovai_leads", "aprovai_assinantes"),
-    ("Primeira Fila", "visita > pagina de espaco > paga (desde 17/11)",
+    ("Outros", "Primeira Fila", "visita > pagina de espaco > paga (desde 17/11)",
      "pf_jornada_visitas", "pf_jornada_pag_espaco", "pf_reservas_pagas"),
 ]
 SDRS = [("Incentivador", "incentivador_disparados", "incentivador_cards"),
@@ -53,15 +57,21 @@ def montar_painel(r, agora):
                   " · disparos da Automatize em detalhe na aba Brenda")
     p.linha(dp.Cartao("Projetos aptos a captar", v("plataforma_aptos")),
             dp.Cartao("Membros da Comunidade", v("comunidade_membros")),
-            dp.Cartao("Incentivadores em reuniao+ (pipeline todo)", v("incentivador_pipeline_reuniao")),
-            dp.Cartao("Receita digital", v("aprovai_mrr") + v("pf_valor_pago"), dp.FMT_BRL))
+            dp.Cartao(f"Reunioes de incentivador (Brenda: {int(v('incentivador_reuniao'))})",
+                      v("incentivador_pipeline_reuniao")),
+            dp.Cartao("Receita do mes (MRR + comissao PF)",
+                      v("aprovai_mrr") + v("pf_comissao_mes"), dp.FMT_BRL))
     linhas = []
-    for nome, etapas, comeco, meio, fim in PRODUTOS:
+    for publico, nome, etapas, comeco, meio, fim in PRODUTOS:
         c, m, f = v(comeco), v(meio), v(fim)
-        linhas.append([nome, etapas, c, m, f, dp.taxa(f, c)])
-    p.linha(dp.Tabela("Funil de cada produto", ["Produto", "Etapas", "Comeco", "Meio", "Fim", "Fim / comeco"],
-                      linhas, formatos=[None, None, dp.FMT_INT, dp.FMT_INT, dp.FMT_INT, dp.FMT_PCT],
-                      gradiente=[5]))
+        cm, mf = (dp.taxa(m, c), dp.taxa(f, m)) if meio else ("", "")
+        gargalo = "" if not meio or not c else ("Comeco > meio" if cm <= mf else "Meio > fim")
+        linhas.append([publico, nome, etapas, c, m, f, cm, mf, dp.taxa(f, c), gargalo])
+    p.linha(dp.Tabela("Funil de cada produto, por publico",
+                      ["Publico", "Produto", "Etapas", "Comeco", "Meio", "Fim", "Comeco > meio", "Meio > fim",
+                       "Fim / comeco", "Onde mais perde"],
+                      linhas, formatos=[None, None, None, dp.FMT_INT, dp.FMT_INT, dp.FMT_INT, dp.FMT_PCT,
+                                        dp.FMT_PCT, dp.FMT_PCT, None]))
     return p, sorted(set(faltando))
 
 

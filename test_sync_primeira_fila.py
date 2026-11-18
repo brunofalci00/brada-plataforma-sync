@@ -12,7 +12,7 @@ def _dados(abordados=4, cadastraram=1, diario=None):
         "espacos": {"cadastrados": 28, "no_ar": 22, "em_revisao": 1},
         "anfitrioes": {"perfis": 40, "plano_rede": 22, "plano_basico": 18, "contas_recebimento": 16},
         "procura": {"cliques_total": 702, "cliques_30d": 629, "conversas": 4, "pedidos_reserva": 11},
-        "reservas": {"pagas": 0, "valor_pago": 0.0, "comissao": 0.0, "canceladas_expiradas": 4},
+        "reservas": {"pagas": 0, "valor_pago": 0.0, "comissao": 0.0, "canceladas_expiradas": 4, "comissao_mes": 0.0},
         "hunter": {"captados": 154, "abordados": abordados, "responderam": 2, "cadastraram": cadastraram},
         "diario": diario or [],
     }

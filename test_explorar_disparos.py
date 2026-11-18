@@ -80,3 +80,21 @@ def test_fonte_do_banco_nao_injeta_formula():
     linhas = [[46329, "Incentivador", "E-mail", 'x");IMPORTXML("h', 9, 0, 0, 0, 0, 0],
               [46329, "Incentivador", "E-mail", "salic", 1, 0, 0, 0, 0, 0]]
     assert ex.fontes(linhas) == ["salic"]
+
+
+def test_saude_marca_frente_parada_por_dias_uteis():
+    import sdr_automatize as s
+    hoje = datetime.date(2026, 11, 18)  # quarta
+    env = [{"modalidade": s.INCENTIVADOR, "dia": datetime.date(2026, 11, 13), "canal": "email"},
+           {"modalidade": s.APTOS, "dia": hoje, "canal": "email"}]
+    linhas = {l[0]: l for l in ex.linhas_saude(env, hoje, fila={})}
+    assert linhas["Incentivador"][2:] == [3, 1, 0, "PARADA"]  # sexta 13 > seg, ter, qua
+    assert linhas["Plataforma"][-1] == "Disparando" and linhas["AprovAI"][-1] == "SEM ENVIO"
+
+
+def test_cartao_de_contagem_nao_compara_base_pequena():
+    import painel_filtros as fl
+    import dashboard_painel as dp
+    c = fl.CartaoVivo("x", "A1", "B1")
+    assert "B1)<20" in str(c.bloco()[1][2])
+    assert "B1)=0" in str(fl.CartaoVivo("t", "A1", "B1", dp.FMT_PCT).bloco()[1][2])

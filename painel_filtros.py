@@ -47,10 +47,14 @@ def F(texto):
     return dp.Formula("=" + texto)
 
 
-def rotulo(valor, topo=None):
+def rotulo(valor, topo=None, anterior=None):
+    """'qtd · % do topo', e com a etapa anterior: 'qtd · % do topo · % da anterior' (mostra onde quebra)."""
     if topo is None:
         return F(f'TEXT({valor};"#,##0")')
-    return F(f'TEXT({valor};"#,##0")&" · "&TEXT(IFERROR({valor}/{topo};0);"0.0%")')
+    txt = f'TEXT({valor};"#,##0")&" · "&TEXT(IFERROR({valor}/{topo};0);"0.0%")&" do topo"'
+    if anterior is not None:
+        txt += f'&" · "&TEXT(IFERROR({valor}/{anterior};0);"0%")&" da anterior"'
+    return F(txt)
 
 
 # ---------- base escondida ----------
@@ -229,14 +233,19 @@ class FunilVivo(dp.Funil):
     def bloco(self):
         topo = self.flt.soma_p(self.etapas_vivas[0][1], **self.fixos)
         linhas = [["Etapa", "% do topo", "Rotulo"]]
+        anterior = None
         for i, (nome, etapa) in enumerate(self.etapas_vivas):
             v = self.flt.soma_p(etapa, **self.fixos)
             pct = F(f"IF({topo}>0;1;0)") if i == 0 else F(f"IFERROR({v}/{topo};0)")
-            linhas.append([nome, pct, rotulo(v) if i == 0 else rotulo(v, topo)])
+            linhas.append([nome, pct, rotulo(v) if i == 0 else rotulo(v, topo, anterior if i > 1 else None)])
+            anterior = v
         return linhas
 
     def formatos_dados(self, r0):
         return [(r0 + 1 + i, 1, dp.FMT_PCT) for i in range(len(self.etapas_vivas))]
+
+
+MIN_BASE_COMPARACAO = 20  # periodo B com menos que isso (antes do lancamento, base minuscula) nao compara
 
 
 class CartaoVivo(dp.Cartao):
@@ -245,8 +254,11 @@ class CartaoVivo(dp.Cartao):
         self.fa, self.fb = formula_a, formula_b
 
     def bloco(self):
-        # Base zero vira vazio: o cartao do Sheets mostraria "####%" (divisao por zero).
-        return [[self.titulo], [F(self.fa), "", F(f'IF(({self.fb})=0;"";{self.fb})')]]
+        # Base zero vira vazio: o cartao do Sheets mostraria "####%" (divisao por zero). Em contagem,
+        # base pequena tambem vira vazio: 1 contra 0,01 dava "+14000%", que parecia tendencia.
+        piso = MIN_BASE_COMPARACAO if self.formato == dp.FMT_INT else 0
+        cond = f"({self.fb})<{piso}" if piso else f"({self.fb})=0"
+        return [[self.titulo], [F(self.fa), "", F(f'IF({cond};"";{self.fb})')]]
 
 
 class SerieViva(dp.Serie):
@@ -297,8 +309,9 @@ def comparacao_ab(titulo, flt, etapas):
     for nome, etapa in etapas:
         a, b = flt.soma_p(etapa, "A"), flt.soma_p(etapa, "B")
         linhas.append([nome, F(a), F(f"IFERROR({a}/{topo_a};0)"), F(b), F(f"IFERROR({b}/{topo_b};0)"),
-                       F(f'IFERROR({a}/{b}-1;"")')])
-    return dp.Tabela(titulo, ["Etapa", "A", "% do topo A", "B", "% do topo B", "A sobre B"], linhas,
+                       F(f'IF({b}<{MIN_BASE_COMPARACAO};"";IFERROR({a}/{b}-1;""))')])
+    return dp.Tabela(f"{titulo} (A sobre B fica vazio quando B tem menos de {MIN_BASE_COMPARACAO})",
+                     ["Etapa", "A", "% do topo A", "B", "% do topo B", "A sobre B"], linhas,
                      formatos=[None, dp.FMT_INT, dp.FMT_PCT, dp.FMT_INT, dp.FMT_PCT, dp.FMT_PCT])
 
 

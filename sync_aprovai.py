@@ -157,13 +157,24 @@ def coletar_asaas_rows(now_iso):
     return rows
 
 
-def resumo_asaas(rows):
-    reais = [r for r in rows if r[3] in ("RECEIVED", "CONFIRMED") and not r[8]]
-    teste_ou_staff_sucesso = [r for r in rows if r[3] in ("RECEIVED", "CONFIRMED") and r[8]]
-    mrr = round(sum(r[4] for r in reais), 2)
+DIAS_CICLO_ATIVO = 35  # ciclo mensal + folga de atraso
+
+
+def resumo_asaas(rows, hoje=None):
+    """Assinante = CLIENTE distinto com cobranca paga vencida nos ultimos 35 dias; MRR = ultimo valor
+    pago de cada um. Contar cobranca paga somava o mesmo cliente a cada mes (17/11 + 17/12 = 2)."""
+    hoje = hoje or datetime.date.today()
+    pagas = [r for r in rows if r[3] in ("RECEIVED", "CONFIRMED")]
+    teste_ou_staff_sucesso = [r for r in pagas if r[8]]
+    ativos = {}
+    for r in sorted((r for r in pagas if not r[8]), key=lambda r: str(r[7] or "")):
+        venc = str(r[7] or "")[:10]
+        if venc and 0 <= (hoje - datetime.date.fromisoformat(venc)).days <= DIAS_CICLO_ATIVO:
+            ativos[r[2]] = float(r[4] or 0)
+    mrr = round(sum(ativos.values()), 2)
     return {
         "total_cobrancas_aprovai": len(rows),
-        "assinantes_reais_ativos": len(reais),
+        "assinantes_reais_ativos": len(ativos),
         "mrr_real": mrr,
         "cobrancas_teste_ou_staff_sucesso": len(teste_ou_staff_sucesso),
     }
@@ -418,7 +429,7 @@ def main():
 
     print("Puxando Asaas (cobrancas do AprovAI)...")
     asaas_rows = coletar_asaas_rows(now_iso)
-    resumo = resumo_asaas(asaas_rows)
+    resumo = resumo_asaas(asaas_rows, now.date())
     print(f"  {resumo['total_cobrancas_aprovai']} cobrancas do AprovAI | "
           f"{resumo['assinantes_reais_ativos']} assinantes reais | MRR R${resumo['mrr_real']}")
 

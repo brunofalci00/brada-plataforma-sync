@@ -1252,6 +1252,11 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "vence_60d": vencem_ate(60),
         "vence_90d": vencem_ate(90),
         "vence_180d": vencem_ate(180),
+        # 84% dos DOUs vencem em 31/12 (janela anual): o pico do fim do ano nao e evasao.
+        "vence_3112": sum(1 for r in project_records if analytics.apto(r)
+                          and r["data_expiracao_cac"] == f"{now_brt.year}-12-31"),
+        "aptos_com_prazo": sum(1 for r in project_records if analytics.apto(r)
+                               and r["data_expiracao_cac"] >= hoje_iso),
         "funil_cadastraram": funnel["cadastros"],
         "funil_acessaram": sum(1 for r in ongs if r[u["logou_alguma_vez"]] == "sim"),
         "funil_com_projeto": funnel["criaram"],

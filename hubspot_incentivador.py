@@ -174,8 +174,10 @@ def cards_ao_vivo(deal_ids):
             p = r["properties"]
             hist = r.get("propertiesWithHistory", {}).get("dealstage") or []
             entrou = max((h["timestamp"] for h in hist), default=p.get("createdate"))
+            passou = any(h.get("value") in BEYOND_REUNIAO for h in hist) or p.get("dealstage") in BEYOND_REUNIAO
             cards[r["id"]] = {"estagio": p.get("dealstage"), "dono": p.get("hubspot_owner_id") or "",
-                              "criado": p.get("createdate") or "", "entrou_estagio": entrou or ""}
+                              "criado": p.get("createdate") or "", "entrou_estagio": entrou or "",
+                              "passou_reuniao": passou}
     return cards
 
 
