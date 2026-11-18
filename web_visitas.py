@@ -74,7 +74,8 @@ def tipo_busca(consulta, marca):
 
 def bases(slug):
     return (fl.Base(f"base_{slug}_visitas", [("origem", "Origem", fl.TODAS)], [
-                ("sessoes", "Sessoes"), ("engajadas", "Sessoes engajadas"), ("novos", "Novos usuarios")]),
+                ("sessoes", "Sessoes"), ("engajadas", "Sessoes engajadas"), ("novos", "Novos usuarios"),
+                ("compras", "Compras")]),
             fl.Base(f"base_{slug}_busca", [("tipo", "Tipo de busca", fl.TODAS)], [
                 ("impressoes", "Impressoes"), ("cliques", "Cliques"), ("pos_imp", "Posicao x impressoes x10")]))
 
@@ -106,7 +107,8 @@ def _ga(sessao, prop):
     corpo = {"dateRanges": [{"startDate": "120daysAgo", "endDate": "today"}],
              "dimensions": [{"name": "date"}, {"name": "sessionSource"}, {"name": "sessionMedium"},
                             {"name": "hostName"}],
-             "metrics": [{"name": "sessions"}, {"name": "engagedSessions"}, {"name": "newUsers"}],
+             "metrics": [{"name": "sessions"}, {"name": "engagedSessions"}, {"name": "newUsers"},
+                         {"name": "ecommercePurchases"}],
              "limit": 100000}
     r = _post(sessao, ga_analytics.URL_RELATORIO.format(prop), corpo)
     out = []
@@ -195,7 +197,8 @@ def resto_oculto(por_busca, totais):
 
 def linhas_bases(slug, dados):
     b_vis, b_bus = bases(slug)
-    vis = b_vis.agregar((d, {"origem": c}, {"sessoes": v[0], "engajadas": v[1], "novos": v[2]})
+    vis = b_vis.agregar((d, {"origem": c}, {"sessoes": v[0], "engajadas": v[1], "novos": v[2],
+                                                      "compras": v[3] if len(v) > 3 else 0})
                         for d, c, v in dados["ga"])
     bus = b_bus.agregar((d, {"tipo": t}, {"impressoes": i, "cliques": c, "pos_imp": round(p * i * ESCALA_POS)})
                         for d, t, i, c, p in dados["gsc"])
@@ -223,7 +226,8 @@ def blocos(p, ctl, slug, dados):
                             subtitulo="Sessoes por dia ou semana, empilhadas por canal (GA4)" + aviso))
         p.linha(fl.por_dimensao("De onde vem a visita (periodo A)", v, "origem", canais, [
                     ("Sessoes", "soma", "sessoes"), ("Novos", "soma", "novos"),
-                    ("Engajadas", "taxa", "engajadas")], gradiente=[1], cabecalho_dim="Origem"))
+                    ("Engajadas", "taxa", "engajadas"), ("Compras (GA4)", "soma", "compras")],
+                    gradiente=[1], cabecalho_dim="Origem"))
     else:
         p.linha(dp.Tabela("Visitas no site (GA4)", ["Aviso"], [["Sem dado do GA4 nesta rodada"]]))
 
