@@ -31,6 +31,7 @@ import sync  # reusa auth Sheets, hash_id, pii_guard, write_overwrite, retry
 import dashboard_painel as dp
 import ga_analytics
 import painel_filtros as fl
+import web_visitas
 from painel_filtros import F
 
 # ===================================================
@@ -323,7 +324,7 @@ def _visitas_vivas(fsite):
                         altura=320, subtitulo="Por dia ou semana · todas as origens")
 
 
-def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora):
+def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora, web=None):
     """Filtros no topo; Brenda (elaboracao) e site, vivos pelo periodo, lado a lado e sem ligacao
     (o link do disparo nao tem UTM e o site nao grava origem); depois a foto de hoje."""
     hoje = agora.date()
@@ -375,7 +376,11 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
                   "aprovai_ativos_app": pre_approvals["total_ativos_no_app"]}
     if elab:
         resumo_kpi.update({"elaboracao_disparados": elab[0][1], "elaboracao_cadastros": elab[-1][1]})
-    return p, resumo_kpi, [(BASE_SITE, site), (BASE_ELAB, elab_l)]
+    extras = []
+    if web is not None:
+        web_visitas.blocos(p, ctl, "aprovai", web)
+        extras = web_visitas.linhas_bases("aprovai", web)
+    return p, resumo_kpi, [(BASE_SITE, site), (BASE_ELAB, elab_l)] + extras
 
 
 def coletar_elaboracao():
@@ -435,7 +440,8 @@ def main():
 
     print("Puxando banco do SDR Brada (so elaboracao)...")
     leads_elab, envios_elab = coletar_elaboracao()
-    painel, resumo_kpi, bases = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now)
+    painel, resumo_kpi, bases = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now,
+                                              web_visitas.coletar("aprovai", now.date()))
     print("  resumo:", resumo_kpi)
 
     if args.dry_run:
