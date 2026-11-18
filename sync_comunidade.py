@@ -17,6 +17,7 @@ import sync
 import dashboard_painel as dp
 import ga_analytics
 import painel_filtros as fl
+import web_visitas
 from painel_filtros import F
 
 PROJETO = "brada-comunidade-c1ba5"
@@ -227,7 +228,7 @@ def linhas_base(dados):
     return BASE_COM.agregar(registros())
 
 
-def montar_painel(m, linhas, agora, base_linhas=()):
+def montar_painel(m, linhas, agora, base_linhas=(), web=None):
     ga = m.get("ga")
     base_linhas = list(base_linhas)
     perfis = BASE_COM.opcoes(base_linhas, "perfil") or ["Sem perfil"]
@@ -275,6 +276,8 @@ def montar_painel(m, linhas, agora, base_linhas=()):
               "comunidade_voltaram_7d": m["voltaram_7d"]}
     if ga:
         resumo.update({"comunidade_visitantes_30d": ga["ativos"], "comunidade_retorno": ga["taxa_retorno"]})
+    if web is not None:
+        web_visitas.blocos(p, ctl, "comunidade", web)
     return p, resumo
 
 
@@ -291,7 +294,8 @@ def main():
     tabs = {"raw_comunidade_diario": (HEADER_DIARIO, linhas)}
     sync.pii_guard(tabs)
     base_linhas = linhas_base(dados)
-    painel, resumo = montar_painel(metricas, linhas, agora, base_linhas)
+    web = web_visitas.coletar("comunidade", agora.date())
+    painel, resumo = montar_painel(metricas, linhas, agora, base_linhas, web)
 
     if args.dry_run:
         print("  resumo:", resumo)
@@ -303,6 +307,8 @@ def main():
     sync.write_overwrite(sh, "raw_comunidade_diario", HEADER_DIARIO, linhas)
     svc = sync.build_sheets_service()
     BASE_COM.publicar(sh, svc, sync.SPREADSHEET_ID, base_linhas)
+    for base, linhas_web in web_visitas.linhas_bases("comunidade", web):
+        base.publicar(sh, svc, sync.SPREADSHEET_ID, linhas_web)
     painel.publicar(sh, svc, sync.SPREADSHEET_ID)
     dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo, agora)
     print("Comunidade: aba e raw atualizados.")

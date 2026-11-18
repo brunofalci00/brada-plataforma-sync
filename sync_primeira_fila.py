@@ -15,6 +15,7 @@ import os
 import sync
 import dashboard_painel as dp
 import painel_filtros as fl
+import web_visitas
 
 SECRETS_FILE = os.path.expanduser("~/.brada-secrets/automatize-primeira-fila-dados.env")
 
@@ -241,7 +242,7 @@ def por_semana(diario, hoje, colunas, n=10):
     return [[s.strftime("%d/%m"), *v] for s, v in cont.items()]
 
 
-def montar_painel(dados, agora):
+def montar_painel(dados, agora, web=None):
     """Filtros no topo (periodo A/B, cidade, categoria, canal); anfitriao (Hunter) e demanda vivos;
     espaco reservado para o produtor; depois a foto de hoje (espacos, planos, totais)."""
     e, a, p, r = (dados[k] for k in ("espacos", "anfitrioes", "procura", "reservas"))
@@ -294,7 +295,11 @@ def montar_painel(dados, agora):
     resumo = {"pf_espacos_no_ar": e["no_ar"], "pf_cliques_30d": p["cliques_30d"], "pf_cliques_total": p["cliques_total"],
               "pf_pedidos": p["pedidos_reserva"], "pf_reservas_pagas": r["pagas"], "pf_valor_pago": r["valor_pago"],
               "pf_anfitrioes": a["perfis"]}
-    return painel, resumo, [(BASE_HUNTER, hl), (BASE_DEMANDA, dl)]
+    extras = []
+    if web is not None:
+        web_visitas.blocos(painel, ctl, "pf", web)
+        extras = web_visitas.linhas_bases("pf", web)
+    return painel, resumo, [(BASE_HUNTER, hl), (BASE_DEMANDA, dl)] + extras
 
 
 def main():
@@ -312,7 +317,7 @@ def main():
 
     tabs = {"raw_primeira_fila_diario": (HEADER_DIARIO, dados["diario"])}
     sync.pii_guard(tabs)
-    painel, resumo, bases = montar_painel(dados, now)
+    painel, resumo, bases = montar_painel(dados, now, web_visitas.coletar("pf", now.date()))
 
     if args.dry_run:
         print("  resumo:", resumo)
