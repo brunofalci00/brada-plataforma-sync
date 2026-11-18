@@ -8,8 +8,8 @@ AGORA = datetime.datetime(2026, 11, 12, 10, 0)
 def _resumo():
     return {
         "plataforma_aptos": 390, "comunidade_membros": 131, "incentivador_pipeline_reuniao": 151,
-        "aprovai_mrr": 89.0, "pf_valor_pago": 200.0,
-        "incentivador_disparados": 632, "incentivador_cards": 119, "incentivador_reuniao": 0,
+        "aprovai_mrr": 89.0, "pf_valor_pago": 2000.0, "pf_comissao_mes": 200.0,
+        "incentivador_disparados": 632, "incentivador_engajaram": 64, "incentivador_cards": 119, "incentivador_reuniao": 0,
         "elaboracao_disparados": 707, "elaboracao_cadastros": 4, "aprovai_assinantes": 0,
         "aptos_sdr_disparados": 1986, "aptos_sdr_cadastros": 59, "aptos_sdr_aptos": 17,
         "plataforma_novos_cadastros": 156, "plataforma_novos_aptos": 57,
@@ -27,20 +27,23 @@ def test_visao_geral_enxuta_so_cartoes_e_funil_por_produto():
     assert faltando == []
     assert len(painel.linhas) == 2 and len(painel.linhas[0]) == 4
     funil = painel.linhas[1][0]
-    assert funil.titulo == "Funil de cada produto" and len(funil.linhas) == len(vg.PRODUTOS)
+    assert funil.titulo == "Funil de cada produto, por publico" and len(funil.linhas) == len(vg.PRODUTOS)
+    assert funil.gradiente == ()  # funis de profundidade diferente nao se ranqueiam
 
 
 def test_receita_digital_soma_aprovai_e_primeira_fila():
     painel, _ = vg.montar_painel(_resumo(), AGORA)
-    assert _componente(painel, "Receita digital").valor == 289.0
+    assert _componente(painel, "Receita do mes (MRR + comissao PF)").valor == 289.0  # GMV fica de fora
 
 
 def test_tabela_de_produtos_fim_sobre_comeco():
     painel, _ = vg.montar_painel(_resumo(), AGORA)
-    linhas = {l[0]: l for l in _componente(painel, "Funil de cada produto").linhas}
-    assert linhas["SDR Aptos"][2:5] == [1986, 59, 17]
-    assert linhas["Plataforma (novos)"][3] == ""  # sem etapa do meio
-    assert round(linhas["Plataforma (novos)"][5], 4) == round(57 / 156, 4)
+    linhas = {l[1]: l for l in _componente(painel, "Funil de cada produto, por publico").linhas}
+    assert linhas["SDR Aptos"][3:6] == [1986, 59, 17]
+    assert linhas["SDR Aptos"][9] == "Comeco > meio"  # 3% contra 29%
+    plat = linhas["Plataforma (novos, todas as origens)"]
+    assert plat[4] == "" and plat[6] == "" and plat[9] == ""  # sem etapa do meio
+    assert round(plat[8], 4) == round(57 / 156, 4)
 
 
 def test_chave_ausente_vira_zero_e_e_reportada():
@@ -48,8 +51,9 @@ def test_chave_ausente_vira_zero_e_e_reportada():
     del resumo["aprovai_visitas"]
     painel, faltando = vg.montar_painel(resumo, AGORA)
     assert faltando == ["aprovai_visitas"]
-    linha = next(l for l in _componente(painel, "Funil de cada produto").linhas if l[0] == "AprovAI (app)")
-    assert linha[2] == 0 and linha[5] == 0
+    linha = next(l for l in _componente(painel, "Funil de cada produto, por publico").linhas
+                 if l[1] == "AprovAI (app)")
+    assert linha[3] == 0 and linha[8] == 0
 
 
 def test_foto_da_capacidade_e_da_fila_vai_para_a_aba_brenda():

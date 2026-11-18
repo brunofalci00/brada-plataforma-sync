@@ -20,8 +20,14 @@ def _leads():
 
 def test_funil_cumulativo_nunca_sobe():
     etapas = [v for _, v in si.funil(_leads())]
-    assert etapas == [5, 4, 2, 2, 1]
+    assert etapas == [5, 4, 2, 1]  # agenda e card sao uma etapa so (o robo cria o card)
     assert etapas == sorted(etapas, reverse=True)
+
+
+def test_card_perdido_que_passou_por_reuniao_conta_reuniao():
+    envios = [{"lead_id": "p", "dia": D(2026, 11, 10), "canal": "email", **{m: False for m in sdra.MARCAS}}]
+    leads = si.completar(sdra.por_lead(envios), {"p": "d9"}, {"d9": "closedlost"}, {"d9": True})
+    assert leads["p"]["reuniao"] and not leads["p"]["ganho"]
 
 
 def test_base_um_lead_por_linha_cumulativa_com_ganho():

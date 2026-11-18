@@ -106,7 +106,7 @@ def taxas_vivas(flt, dimensao, valores):
     return linhas + [["Bounce"] + [cel(bounce(flt, **{dimensao: v}), v) for v in valores]]
 
 
-def montar_painel(linhas_base, agora, foto=()):
+def montar_painel(linhas_base, agora, foto=(), saude=None):
     lista_fontes = fontes(linhas_base)
     recentes = agora.date() - datetime.timedelta(days=2 * JANELA_PADRAO - 1)
     com_volume = BASE.opcoes(linhas_base, "fonte", desde=recentes) or lista_fontes[:1] or [SEM_FONTE]
@@ -116,6 +116,8 @@ def montar_painel(linhas_base, agora, foto=()):
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · mude as células claras abaixo; "
                   f"voltam para os últimos {JANELA_PADRAO} dias a cada atualização")
     p.linha(ctl)
+    if saude is not None:
+        p.linha(saude)
     env_a, env_b = flt.soma_p("envios", "A"), flt.soma_p("envios", "B")
     p.linha(fl.CartaoVivo("Envios", env_a, env_b),
             fl.CartaoVivo("Envios por dia", f"{env_a}/{flt.dias('A')}", f"{env_b}/{flt.dias('B')}", dp.FMT_INT),
@@ -165,6 +167,34 @@ def linhas_fila(envios, fila, hoje, janela=28):
         canal = nome_canal(f["canal_fila"]) if f["canal_fila"] else "-"
         out.append([nome, recentes / janela, f["enviados"], f["na_fila"], canal])
     return out
+
+
+LIMITE_PARADA = 2  # dias uteis sem envio para a frente contar como parada
+
+
+def linhas_saude(envios, hoje, frentes=None, fila=None):
+    """[frente, ultimo envio, dias uteis sem envio, envios 7d, na fila, situacao] por frente."""
+    out = []
+    for m, nome in (frentes or FRENTES):
+        dias = [e["dia"] for e in envios if e.get("modalidade", m) == m and e["dia"]]
+        ultimo = max(dias) if dias else None
+        parado = sdr.dias_uteis_sem_envio(ultimo, hoje)
+        sete = sum(1 for d in dias if d > hoje - datetime.timedelta(days=7))
+        situacao = "SEM ENVIO" if ultimo is None else ("PARADA" if parado > LIMITE_PARADA else "Disparando")
+        linha = [nome, ultimo.strftime("%d/%m") if ultimo else "-", parado if parado is not None else "-", sete]
+        if fila is not None:
+            linha.append(fila.get(m, {}).get("na_fila", 0))
+        out.append(linha + [situacao])
+    return out
+
+
+def tabela_saude(envios, hoje, frentes=None, fila=None,
+                 titulo=f"A Brenda esta disparando? (hoje, sem filtro · PARADA = mais de {LIMITE_PARADA} dias uteis sem envio)"):
+    cab = ["Frente", "Ultimo envio", "Dias uteis sem envio", "Envios em 7 dias"] + (
+        ["Esperando na fila"] if fila is not None else []) + ["Situacao"]
+    return dp.Tabela(titulo, cab, linhas_saude(envios, hoje, frentes, fila),
+                     formatos=[None, None, dp.FMT_INT, dp.FMT_INT] + ([dp.FMT_INT] if fila is not None else []) + [None],
+                     gradiente=[2])
 
 
 def componentes_visao_geral(envios, fila, hoje):
@@ -217,7 +247,8 @@ def main():
     renomear_abas_antigas(sh, svc, sync.SPREADSHEET_ID)
     publicar_base(sh, svc, sync.SPREADSHEET_ID, linhas)
     foto = componentes_visao_geral(envios, fila, agora.date())
-    montar_painel(linhas, agora, foto).publicar(sh, svc, sync.SPREADSHEET_ID, indice=1)
+    saude = tabela_saude(envios, agora.date(), fila=fila)
+    montar_painel(linhas, agora, foto, saude).publicar(sh, svc, sync.SPREADSHEET_ID, indice=1)
     print(f"Brenda: aba publicada ({len(linhas)} linhas na base).")
 
 

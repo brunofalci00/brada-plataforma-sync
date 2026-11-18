@@ -84,9 +84,11 @@ CONSULTAS = {
         select count(*) filter (where pagamento_status = 'pago' and status <> 'cancelada'),
                coalesce(sum(valor_total) filter (where pagamento_status = 'pago' and status <> 'cancelada'), 0),
                coalesce(sum(comissao) filter (where pagamento_status = 'pago' and status <> 'cancelada'), 0),
-               count(*) filter (where status in ('cancelada', 'expirada'))
+               count(*) filter (where status in ('cancelada', 'expirada')),
+               coalesce(sum(comissao) filter (where pagamento_status = 'pago' and status <> 'cancelada'
+                   and pago_em >= date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'), 0)
         from reservas_reais""",
-        ["pagas", "valor_pago", "comissao", "canceladas_expiradas"]),
+        ["pagas", "valor_pago", "comissao", "canceladas_expiradas", "comissao_mes"]),
     "hunter": ("""
         select count(*),
                count(*) filter (where disparado_em is not null),
@@ -358,6 +360,7 @@ def montar_painel(dados, agora, web=None):
                      ("Sem plano", a["perfis"] - a["plano_rede"] - a["plano_basico"])]))
     resumo = {"pf_espacos_no_ar": e["no_ar"], "pf_cliques_30d": p["cliques_30d"], "pf_cliques_total": p["cliques_total"],
               "pf_pedidos": p["pedidos_reserva"], "pf_reservas_pagas": r["pagas"], "pf_valor_pago": r["valor_pago"],
+              "pf_comissao_mes": r["comissao_mes"],
               "pf_anfitrioes": a["perfis"],
               "pf_jornada_visitas": _total(jl, BASE_JORNADA, "visitas"),
               "pf_jornada_pag_espaco": _total(jl, BASE_JORNADA, "pag_espaco")}

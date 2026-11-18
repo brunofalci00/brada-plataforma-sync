@@ -1,3 +1,4 @@
+import datetime
 """Testes da logica pura de sync_aprovai.py: classificacao de cobranca do
 AprovAI dentro da conta Asaas compartilhada, e de teste/staff. Nenhuma chamada
 de rede; so os dois filtros que decidem o que entra no dashboard."""
@@ -63,11 +64,21 @@ def test_resumo_asaas_exclui_refunded_e_teste():
         ["t", "p2", "c2", "CONFIRMED", 89, "CREDIT_CARD", "2026-11-01", "2026-11-01", False],
         ["t", "p3", "c3", "RECEIVED", 89, "PIX", "2026-11-02", "2026-11-02", True],
     ]
-    resumo = resumo_asaas(rows)
+    resumo = resumo_asaas(rows, datetime.date(2026, 11, 18))
     assert resumo["total_cobrancas_aprovai"] == 3
     assert resumo["assinantes_reais_ativos"] == 1  # so a confirmada e nao-teste
     assert resumo["mrr_real"] == 89
     assert resumo["cobrancas_teste_ou_staff_sucesso"] == 1
+
+
+def test_assinante_e_cliente_ativo_nao_cobranca_paga():
+    rows = [
+        ["t", "p1", "c1", "CONFIRMED", 89, "CREDIT_CARD", "2026-11-17", "2026-11-17", False],
+        ["t", "p2", "c1", "RECEIVED", 89, "CREDIT_CARD", "2026-11-18", "2026-12-17", False],
+        ["t", "p3", "c2", "RECEIVED", 89, "PIX", "2026-08-01", "2026-08-01", False],  # parou de pagar
+    ]
+    resumo = resumo_asaas(rows, datetime.date(2026, 12, 18))
+    assert resumo["assinantes_reais_ativos"] == 1 and resumo["mrr_real"] == 89
 
 
 def test_resumo_pre_approvals_separa_migrado_sem_billing_de_billing_real():

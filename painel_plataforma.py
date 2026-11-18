@@ -140,6 +140,10 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore da plataforma + banco do SDR Brada · "
                   "mude as células claras abaixo")
     p.linha(ctl)
+    if envios_sdr is not None:
+        import explorar_disparos as ex
+        import sdr_automatize as sdra
+        p.linha(ex.tabela_saude(envios_sdr, hoje, [(sdra.APTOS, "Plataforma")]))
     p.linha(fl.CartaoVivo("Brenda: leads disparados", fsdr.soma_p("disparados", "A"), fsdr.soma_p("disparados", "B")),
             fl.CartaoVivo("Brenda: cadastros", fsdr.soma_p("cadastro", "A"), fsdr.soma_p("cadastro", "B")),
             fl.CartaoVivo("Contas novas (todas as origens)", fcontas.soma_p("contas", "A"),
@@ -177,9 +181,11 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                 ("Aptos a captar", m["proj_ativos"]), ("Prazo vencido", m["proj_a_reativar"]),
                 ("Sem prazo", m["proj_sem_prazo"]), ("Rascunho", m["st_rascunho"]),
                 ("Concluido", m["st_concluido"])], altura=340),
-            dp.Serie("Aptos que perdem o prazo (foto de hoje)", ["Quando", "Projetos"], [
-                ["Ate 30 dias", m["vence_30d"]], ["31 a 60", m["vence_60d"] - m["vence_30d"]],
-                ["61 a 90", m["vence_90d"] - m["vence_60d"]], ["91 a 180", m["vence_180d"] - m["vence_90d"]]]))
+            dp.Serie(f"Quando os {m['proj_ativos']} aptos saem da vitrine (foto de hoje)", ["Quando", "Projetos"], [
+                ["Ate 30 dias", m["vence_30d"]], ["31 a 60 dias", m["vence_60d"] - m["vence_30d"]],
+                ["61 a 90 dias", m["vence_90d"] - m["vence_60d"]], ["91 a 180 dias", m["vence_180d"] - m["vence_90d"]],
+                ["Mais de 180 dias", max(m["proj_ativos"] - m["vence_180d"], 0)]],
+                subtitulo=f"{m.get('vence_3112', 0)} vencem em 31/12: prazo anual do DOU, a ONG renova, nao e evasao"))
     p.linha(dp.Serie("Aptos a captar e usuarios ativos", ["Dia", "Aptos a captar", "Ativos em 30 dias"],
                      _tendencia(tendencia_rows), tipo="LINE", rotulos=False, subtitulo="Ultimos 60 dias"))
     if ga:

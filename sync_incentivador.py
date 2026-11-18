@@ -26,9 +26,12 @@ BASE = fl.Base("base_incentivador", [("canal", "Canal", fl.TODOS), ("fonte", "Fo
     ("disparados", "Disparados"), ("entregues", "Entregues"), ("abriram", "Abriram"),
     ("engajaram", "Clicaram ou responderam"), ("agenda", "Foram a agenda"), ("card", "Card no HubSpot"),
     ("reuniao", "Reuniao ou alem"), ("ganho", "Ganho")])
+# A Automatize cria o card no HubSpot sozinha quando o lead abre a agenda: "card" nao e conversao,
+# entao agenda e card viram uma etapa so (a base guarda as duas colunas para conferencia).
+ETAPA_AGENDA = "Abriram a agenda (o robo cria o card)"
 FUNIL_VIVO = [("Disparados", "disparados"), ("Entregues", "entregues"), ("Abriram", "abriram"),
-              ("Clicaram ou responderam", "engajaram"), ("Foram a agenda", "agenda"),
-              ("Card no HubSpot", "card"), ("Reuniao ou alem", "reuniao"), ("Ganho", "ganho")]
+              ("Clicaram ou responderam", "engajaram"), (ETAPA_AGENDA, "agenda"),
+              ("Reuniao ou alem", "reuniao"), ("Ganho", "ganho")]
 CANAIS = ["E-mail", "WhatsApp", "E-mail + WhatsApp"]
 
 CONSULTA_CARDS = "select lead_id, deal_id from dados.hubspot_cards where deal_id is not null"
@@ -37,13 +40,17 @@ HEADER_RAW = ["lead_id_hash", "primeiro_disparo", "canais", "engajou", "foi_agen
               "reuniao_ou_alem", "estagio_atual", "bounce"]
 
 
-def completar(leads, cards_por_lead, estagios):
-    """Marca card/reuniao pelo HubSpot e torna as etapas cumulativas."""
+def completar(leads, cards_por_lead, estagios, passou=None):
+    """Marca card/reuniao pelo HubSpot e torna as etapas cumulativas.
+
+    Reuniao = o card PASSOU por reuniao ou alem em algum momento (historico do dealstage): o card
+    que teve reuniao e depois foi perdido nao some do funil."""
+    passou = passou or {}
     for lead_id, l in leads.items():
         deal = cards_por_lead.get(lead_id)
         l["card"] |= deal is not None
         l["estagio"] = estagios.get(deal) if deal else None
-        l["reuniao"] = l["estagio"] in hub.BEYOND_REUNIAO
+        l["reuniao"] = l["estagio"] in hub.BEYOND_REUNIAO or bool(deal and passou.get(deal))
         l["ganho"] = l["estagio"] in hub.GANHO_OU_ALEM
         l["agenda"] |= l["card"]
         l["engajou"] = l["clicou"] or l["respondeu"] or l["agenda"]
@@ -66,8 +73,7 @@ def funil(leads):
     return [
         ("Disparados", len(v)),
         ("Clicaram ou responderam", sum(l["engajou"] for l in v)),
-        ("Foram a agenda", sum(l["agenda"] for l in v)),
-        ("Card no HubSpot", sum(l["card"] for l in v)),
+        (ETAPA_AGENDA, sum(l["agenda"] for l in v)),
         ("Reuniao ou alem", sum(l["reuniao"] for l in v)),
     ]
 
@@ -90,7 +96,7 @@ def por_executivo(cards, nomes, hoje):
         grupos.setdefault(dono, []).append(c)
     linhas = []
     for dono, cs in grupos.items():
-        reuniao = sum(c["estagio"] in hub.BEYOND_REUNIAO for c in cs)
+        reuniao = sum(c["estagio"] in hub.BEYOND_REUNIAO or bool(c.get("passou_reuniao")) for c in cs)
         perdido = sum(c["estagio"] == "closedlost" for c in cs)
         abertos = [c for c in cs if c["estagio"] not in hub.BEYOND_REUNIAO and c["estagio"] != "closedlost"]
         dias = sorted((hoje - _data(c["entrou_estagio"])).days for c in abertos if c["entrou_estagio"])
@@ -106,7 +112,7 @@ def pipeline_hubspot(hs):
             ["Executivo Brada", hs["total_executivo"], sum(1 for r in rows if r[2] == "Executivo Brada")]]
 
 
-def montar_painel(leads, hs, agora, executivos=()):
+def montar_painel(leads, hs, agora, executivos=(), envios=None):
     """Filtros no topo (periodo A/B, canal, fonte), funil do disparo ao ganho e a foto do pipeline."""
     linhas = linhas_base(leads)
     fontes = BASE.opcoes(linhas, "fonte")
@@ -118,20 +124,23 @@ def montar_painel(leads, hs, agora, executivos=()):
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + HubSpot ao vivo · "
                   "leads contados na data do 1o disparo; mude as células claras abaixo")
     p.linha(ctl)
+    if envios is not None:
+        import explorar_disparos as ex
+        p.linha(ex.tabela_saude(envios, agora.date(), [(sdra.INCENTIVADOR, "Incentivador")]))
 
     def ab(etapa):
         return flt.soma_p(etapa, "A"), flt.soma_p(etapa, "B")
 
     p.linha(fl.CartaoVivo("Leads disparados", *ab("disparados")),
-            fl.CartaoVivo("Cards no HubSpot", *ab("card")),
+            fl.CartaoVivo("Clicaram ou responderam", *ab("engajaram")),
             fl.CartaoVivo("Reuniao ou alem", *ab("reuniao")),
             fl.CartaoVivo("Disparo ate reuniao", flt.taxa("reuniao", "A"), flt.taxa("reuniao", "B"), dp.FMT_PCT))
-    d, e, ag, c, r = (flt.soma_p(k) for k in ("disparados", "engajaram", "agenda", "card", "reuniao"))
+    d, e, ag, r = (flt.soma_p(k) for k in ("disparados", "engajaram", "agenda", "reuniao"))
     p.linha(fl.FunilVivo("Do disparo ao ganho (periodo A)", flt, FUNIL_VIVO, altura=360,
-                         subtitulo="% sobre os disparados · reuniao e ganho = estagio atual do card no HubSpot"),
+                         subtitulo="% sobre os disparados · o card nasce sozinho ao abrir a agenda · reuniao = o card ja passou por reuniao"),
             fl.RoscaViva("Onde cada lead do periodo A parou", [
                 ("Sem resposta", F(f"{d}-{e}")), ("Engajou sem agenda", F(f"{e}-{ag}")),
-                ("Agenda sem card", F(f"{ag}-{c}")), ("Card sem reuniao", F(f"{c}-{r}")),
+                ("Agenda sem reuniao", F(f"{ag}-{r}")),
                 ("Reuniao ou alem", F(r))], altura=360))
     if executivos:
         cards = sum(r[1] for r in executivos)
@@ -149,13 +158,14 @@ def montar_painel(leads, hs, agora, executivos=()):
     p.linha(fl.por_dimensao("Por fonte do lead no periodo A", flt, "fonte",
                             BASE.opcoes(linhas, "fonte", desde=recentes) or fontes[:1], [
         ("Disparados", "soma", "disparados"), ("Engajamento", "taxa", "engajaram"),
-        ("Cards", "soma", "card"), ("Reunioes", "soma", "reuniao"),
+        ("Abriram a agenda", "soma", "agenda"), ("Reunioes", "soma", "reuniao"),
         ("Disparo ate reuniao", "taxa", "reuniao")], gradiente=[1, 5], cabecalho_dim="Fonte"))
     p.linha(dp.Serie("Pipeline Incentivador no HubSpot (foto de hoje, sem filtro)",
                      ["Quem trabalha", "Cards no pipeline", "Reuniao ou alem"], pipeline_hubspot(hs), tipo="BAR",
                      subtitulo="Todo o pipeline, nao so os leads da Brenda"))
     etapas = funil(leads)
-    resumo = {"incentivador_disparados": etapas[0][1], "incentivador_cards": etapas[3][1],
+    resumo = {"incentivador_disparados": etapas[0][1], "incentivador_engajaram": etapas[1][1],
+              "incentivador_cards": etapas[2][1],
               "incentivador_reuniao": etapas[-1][1], "incentivador_pipeline_reuniao": len(hs["rows"])}
     return p, resumo, linhas
 
@@ -191,7 +201,8 @@ def main():
     print("Banco do SDR Brada (so incentivador) + estagios ao vivo...")
     envios, cards_por_lead, cards = coletar()
     estagios = {d: c["estagio"] for d, c in cards.items()}
-    leads = completar(sdra.por_lead(envios), cards_por_lead, estagios)
+    passou = {d: c.get("passou_reuniao", False) for d, c in cards.items()}
+    leads = completar(sdra.por_lead(envios), cards_por_lead, estagios, passou)
     executivos = por_executivo(cards, hub.nomes_donos(), agora.date())
     for r in executivos:
         print("  ", r)
@@ -204,7 +215,7 @@ def main():
             "raw_hubspot_incentivador": (hub.HEADER_RAW, hs["rows"])}
     sync.pii_guard(tabs)
     print("pii_guard: OK (zero hits)")
-    painel, resumo, linhas = montar_painel(leads, hs, agora, executivos)
+    painel, resumo, linhas = montar_painel(leads, hs, agora, executivos, envios)
 
     if args.dry_run:
         print("--dry-run: nada escrito.", resumo)
