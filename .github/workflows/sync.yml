@@ -95,6 +95,8 @@ jobs:
           PF_DB_HOST: ${{ secrets.PF_DB_HOST }}
           PF_DB_USER: ${{ secrets.PF_DB_USER }}
           PF_DB_PASSWORD: ${{ secrets.PF_DB_PASSWORD }}
+          # Jornada e origem da visita leem o GA4 (564549121) pela conta dashboard-leitura desde o PR #49.
+          COMUNIDADE_SA_JSON: ${{ secrets.COMUNIDADE_SA_JSON }}
         run: python sync_primeira_fila.py
 
       # Aba Comunidade: Firestore + Auth de brada-comunidade-c1ba5, conta dashboard-leitura (so leitura).
