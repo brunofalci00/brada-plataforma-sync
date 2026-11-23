@@ -47,12 +47,14 @@ PRODUTOS = [
 FRENTES_BRENDA = [("Incentivador", "incentivador"), ("Elaboracao", "elaboracao"), ("Plataforma", "plataforma")]
 LIMITE_PARADA = 2  # mesmo corte da aba Brenda
 
-# Precisa de acao (decisao de 23/11): (o que olhar, chave, limite, quando dispara, dono). Dispara se valor > limite.
+# Precisa de acao: (o que olhar, chave, limite, quando dispara). Dispara se valor > limite.
+# Sem coluna de dono por enquanto (Bruno, 23/11): os donos ainda nao estao combinados.
 ALERTAS = [
-    ("Cards da Brenda parados 7+ dias", "incentivador_cards_parados", 0, "mais de 0", "Vanessa (comercial)"),
-    ("Cards da Brenda sem executivo dono", "incentivador_cards_sem_dono", 0, "mais de 0", "Vanessa (comercial)"),
-    ("Projetos com prazo vencido, a reativar", "plataforma_a_reativar", 0, "mais de 0", "Bruno (regua de e-mail)"),
-    ("Rascunhos a ate 3 campos de publicar", "plataforma_rascunhos_perto", 0, "mais de 0", "Bruno (regua de e-mail)"),
+    ("Incentivador: cards da Brenda parados ha 7+ dias no HubSpot", "incentivador_cards_parados", 0, "mais de 0"),
+    ("Incentivador: cards da Brenda sem executivo no HubSpot", "incentivador_cards_sem_dono", 0, "mais de 0"),
+    ("Plataforma: projetos com prazo vencido (sairam da vitrine)", "plataforma_a_reativar", 0, "mais de 0"),
+    ("Plataforma: projetos em rascunho que faltam ate 3 campos para publicar", "plataforma_rascunhos_perto", 0,
+     "mais de 0"),
 ]
 
 
@@ -81,20 +83,19 @@ def linha_produto(publico, produto, periodo, etapas, v):
 
 
 def linhas_alerta(v):
-    """[o que olhar, agora, dispara quando, dono, situacao]: Brenda por frente, comercial, regua, Primeira Fila."""
+    """[o que olhar, agora, dispara quando, situacao]: Brenda por frente, Incentivador, Plataforma, Primeira Fila."""
     out = []
     for nome, chave in FRENTES_BRENDA:
         dias, sete = int(v(f"brenda_{chave}_dias_sem_envio")), int(v(f"brenda_{chave}_envios_7d"))
-        out.append([f"Brenda disparando para {nome}", f"{dias} dias uteis sem envio ({sete} em 7 dias)",
-                    f"mais de {LIMITE_PARADA} dias uteis", "Jean (Automatize)",
-                    "AGIR" if dias > LIMITE_PARADA else "ok"])
-    for nome, chave, limite, quando, dono in ALERTAS:
+        out.append([f"Brenda: disparos para {nome}", f"{dias} dias uteis sem envio ({sete} em 7 dias)",
+                    f"mais de {LIMITE_PARADA} dias uteis sem envio", "AGIR" if dias > LIMITE_PARADA else "ok"])
+    for nome, chave, limite, quando in ALERTAS:
         n = int(v(chave))
-        out.append([nome, dp.num_br(n), quando, dono, "AGIR" if n > limite else "ok"])
+        out.append([nome, dp.num_br(n), quando, "AGIR" if n > limite else "ok"])
     cliques, conversas = int(v("pf_cliques_30d")), int(v("pf_conversas_30d"))
-    out.append(["Primeira Fila: cliques nos espacos que viram conversa (30 dias)",
-                f"{dp.num_br(conversas)} conversas em {dp.num_br(cliques)} cliques", "menos de 1 a cada 100",
-                "Afonso (produto)", "AGIR" if cliques >= 100 and conversas * 100 < cliques else "ok"])
+    out.append(["Primeira Fila: quem clica num espaco do guia e abre conversa com o anfitriao (30 dias)",
+                f"{dp.num_br(conversas)} conversas em {dp.num_br(cliques)} cliques", "menos de 1% dos cliques",
+                "AGIR" if cliques >= 100 and conversas * 100 < cliques else "ok"])
     return sorted(out, key=lambda l: l[-1] != "AGIR")
 
 
@@ -110,9 +111,9 @@ def montar_painel(r, agora):
             dp.Cartao("Reunioes: todas as origens", v("incentivador_pipeline_reuniao")),
             dp.Cartao("Reunioes: vindas da Brenda", v("incentivador_cards_reuniao")),
             dp.Cartao("Receita do mes", v("aprovai_mrr") + v("pf_comissao_mes"), dp.FMT_BRL))
-    p.linha(dp.Tabela("Precisa de acao (AGIR primeiro; cada linha tem um dono)",
-                      ["O que olhar", "Agora", "Dispara quando", "Dono", "Situacao"], linhas_alerta(v),
-                      spans=[4, 3, 2, 2, 1]))
+    p.linha(dp.Tabela("Precisa de acao (AGIR primeiro)",
+                      ["O que olhar", "Agora", "Dispara quando", "Situacao"], linhas_alerta(v),
+                      spans=[6, 3, 2, 1]))
     linhas = [linha_produto(*prod, v) for prod in PRODUTOS]
     p.linha(dp.Tabela("Funil de cada produto (o % de cada etapa e sobre a anterior; cada linha tem o seu periodo)",
                       ["Publico", "Produto", "Periodo", "Primeira etapa", "Etapa do meio", "Ultima etapa",
