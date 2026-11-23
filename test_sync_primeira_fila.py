@@ -44,8 +44,9 @@ def test_funis_vivos_e_bases_no_retorno():
     painel, resumo, bases = pf.montar_painel(dados, AGORA)
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
     assert "Anfitriao: Hunter da captacao ao cadastro (periodo A)" in titulos
-    assert "Produtor (aguardando dado)" in titulos
-    assert [b.aba for b, _ in bases] == ["base_pf_hunter", "base_pf_demanda", "base_pf_jornada"]
+    assert "Produtor: da abordagem ao cadastro (periodo A)" in titulos
+    assert [b.aba for b, _ in bases] == ["base_pf_hunter", "base_pf_demanda", "base_pf_jornada", "base_pf_produtor"]
+    assert resumo["pf_produtor_abordados"] == 0
     assert resumo["pf_cliques_total"] == 702
 
 
