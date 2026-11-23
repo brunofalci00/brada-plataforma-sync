@@ -34,6 +34,8 @@ PRODUTOS = [
      "comunidade_visitantes_30d", "comunidade_membros", "comunidade_primeira_acao"),
     ("Outros", "Primeira Fila", "visita > pagina de espaco > paga (desde 17/11)",
      "pf_jornada_visitas", "pf_jornada_pag_espaco", "pf_reservas_pagas"),
+    ("Outros", "SDR Primeira Fila (produtor SALIC)", "abordado > clicou > cadastro",
+     "pf_produtor_abordados", "pf_produtor_clicaram", "pf_produtor_cadastros"),
 ]
 SDRS = [("Incentivador", "incentivador_disparados", "incentivador_cards"),
         ("Elaboracao", "elaboracao_disparados", "elaboracao_cadastros"),

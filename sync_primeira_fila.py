@@ -16,6 +16,7 @@ import sync
 import dashboard_painel as dp
 import painel_filtros as fl
 import pf_cruzamentos
+import pf_produtor
 import web_visitas
 
 SECRETS_FILE = os.path.expanduser("~/.brada-secrets/automatize-primeira-fila-dados.env")
@@ -281,6 +282,7 @@ def coletar(conn):
     dados["anfitriao_linhas"] = cur.fetchall()
     cur.execute(BASE + pf_cruzamentos.CONSULTA_OFERTA, {"teste": PERFIS_TESTE})
     dados["oferta_local"] = cur.fetchall()
+    dados.update(pf_produtor.coletar(cur))
     return dados
 
 
@@ -300,7 +302,7 @@ def por_semana(diario, hoje, colunas, n=10):
 
 def montar_painel(dados, agora, web=None):
     """Filtros no topo (periodo A/B, cidade, categoria, canal); anfitriao (Hunter) e demanda vivos;
-    espaco reservado para o produtor; depois a foto de hoje (espacos, planos, totais)."""
+    produtor (SALIC) e e-mail por copy; depois a foto de hoje (espacos, planos, totais)."""
     e, a, p, r = (dados[k] for k in ("espacos", "anfitrioes", "procura", "reservas"))
     hoje = agora.date()
     hl = linhas_hunter(dados.get("hunter_linhas", []))
@@ -346,9 +348,7 @@ def montar_painel(dados, agora, web=None):
         ("Clicaram no link", "soma", "clicou"), ("Cadastraram", "soma", "cadastrou")],
         gradiente=[1], cabecalho_dim="Cidade"))
     pf_cruzamentos.blocos(painel, fh, canais, dados.get("oferta_local", []), (web or {}).get("consultas", []))
-    painel.linha(dp.Tabela("Produtor (aguardando dado)", ["Etapa", "Situacao"], [
-        ["Disparos para produtores (SALIC, a partir de 16/11)", "A Automatize ainda nao registrou onde ficam"],
-        ["Resposta, cadastro e reserva do produtor", "Entra quando o registro existir"]]))
+    pl, resumo_produtor = pf_produtor.blocos(painel, ctl, dados)
     painel.linha(dp.Cartao("Espacos no ar (hoje)", e["no_ar"]), dp.Cartao("Anfitrioes (hoje)", a["perfis"]),
                  dp.Cartao("Reservas pagas (desde o lancamento)", r["pagas"]),
                  dp.Cartao("Valor pago (desde o lancamento)", r["valor_pago"], dp.FMT_BRL))
@@ -363,12 +363,12 @@ def montar_painel(dados, agora, web=None):
               "pf_comissao_mes": r["comissao_mes"],
               "pf_anfitrioes": a["perfis"],
               "pf_jornada_visitas": _total(jl, BASE_JORNADA, "visitas"),
-              "pf_jornada_pag_espaco": _total(jl, BASE_JORNADA, "pag_espaco")}
+              "pf_jornada_pag_espaco": _total(jl, BASE_JORNADA, "pag_espaco"), **resumo_produtor}
     extras = []
     if web is not None:
         web_visitas.blocos(painel, ctl, "pf", web)
         extras = web_visitas.linhas_bases("pf", web)
-    return painel, resumo, [(BASE_HUNTER, hl), (BASE_DEMANDA, dl), (BASE_JORNADA, jl)] + extras
+    return painel, resumo, [(BASE_HUNTER, hl), (BASE_DEMANDA, dl), (BASE_JORNADA, jl), (pf_produtor.BASE, pl)] + extras
 
 
 def main():

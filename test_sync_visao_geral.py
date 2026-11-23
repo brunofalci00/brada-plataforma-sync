@@ -15,6 +15,7 @@ def _resumo():
         "plataforma_novos_cadastros": 156, "plataforma_novos_aptos": 57,
         "comunidade_visitantes_30d": 480, "comunidade_primeira_acao": 84,
         "aprovai_visitas": 130, "aprovai_leads": 1, "pf_cliques_total": 882, "pf_jornada_visitas": 21, "pf_jornada_pag_espaco": 10, "pf_pedidos": 0, "pf_reservas_pagas": 0,
+        "pf_produtor_abordados": 59, "pf_produtor_clicaram": 0, "pf_produtor_cadastros": 0,
     }
 
 
