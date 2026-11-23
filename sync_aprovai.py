@@ -201,7 +201,32 @@ def coletar_pre_approvals(db):
     data de inicio/expiracao real. Nao da pra arbitrar qual numero e o assinante
     'de verdade' sem o Thiago; o certo e mostrar os dois lados, nao escolher um."""
     docs = [d.to_dict() for d in db.collection("payment_pre_approvals").stream()]
-    return resumo_pre_approvals(docs)
+    return dict(resumo_pre_approvals(docs), lead_ids=leads_que_assinaram(docs), origens=assinantes_por_origem(docs))
+
+
+def _assinatura_real(d):
+    """Ativa no app e nao migrada do Kiwify sem cobranca (mesmo corte de resumo_pre_approvals)."""
+    return (d.get("subscriptionStatus") == "active"
+            and not (d.get("migratedFromKiwify") and not d.get("subscriptionExpiresAt")))
+
+
+def _utm(d, campo):
+    att = d.get("attribution") if isinstance(d.get("attribution"), dict) else {}
+    return str(d.get(campo) or att.get(campo) or "").strip()
+
+
+def leads_que_assinaram(docs):
+    """lead_id da Brenda (a Automatize manda no utm_term do link) de cada assinatura real. Fica so em memoria:
+    o cruzamento com o SDR de elaboracao sai agregado; na planilha vai so o hash."""
+    return frozenset(_utm(d, "utm_term") for d in docs if _assinatura_real(d) and _utm(d, "utm_term"))
+
+
+def assinantes_por_origem(docs):
+    """[(utm_source, assinaturas reais)] — origem gravada pelo site desde 23/11."""
+    def legivel(o):
+        return f"link vindo de {o[4:]}" if o.startswith("ref:") else (o or "sem origem")
+    cont = Counter(legivel(_utm(d, "utm_source")) for d in docs if _assinatura_real(d))
+    return sorted(cont.items(), key=lambda x: (-x[1], x[0]))
 
 
 def resumo_pre_approvals(docs):
@@ -266,10 +291,12 @@ SITUACAO_COBRANCA = {"RECEIVED": "Pagas", "CONFIRMED": "Pagas", "RECEIVED_IN_CAS
                      "OVERDUE": "Vencidas"}
 
 
-def completar_elaboracao(leads):
-    """Etapas cumulativas do SDR de elaboracao (abriu so existe no e-mail)."""
-    for l in leads.values():
-        l["engajou"] = l["clicou"] or l["respondeu"] or l["cadastro"]
+def completar_elaboracao(leads, assinaram=frozenset()):
+    """Etapas cumulativas do SDR de elaboracao (abriu so existe no e-mail). Fim = assinou o AprovAI
+    (decisao do Bruno, 23/11): o lead_id do disparo voltou no utm_term de uma assinatura real."""
+    for lead_id, l in leads.items():
+        l["assinou"] = lead_id in assinaram
+        l["engajou"] = l["clicou"] or l["respondeu"] or l["cadastro"] or l["assinou"]
         l["abriu"] = l["abriu"] or l["engajou"]
     return leads
 
@@ -278,7 +305,7 @@ def funil_elaboracao(leads):
     v = list(leads.values())
     return [("Disparados", len(v)), ("Abriram", sum(l["abriu"] for l in v)),
             ("Clicaram ou responderam", sum(l["engajou"] for l in v)),
-            ("Cadastro na plataforma Brada", sum(l["cadastro"] for l in v))]
+            ("Assinaram o AprovAI", sum(l.get("assinou", False) for l in v))]
 
 
 def funil_app(funil_rows, resumo):
@@ -309,7 +336,7 @@ BASE_ELAB = fl.Base("base_aprovai_brenda", [("canal", "Canal", fl.TODOS), ("font
     ("disparados", "Disparados"), ("entregues", "Entregues"), ("abriram", "Abriram"),
     ("engajaram", "Clicaram ou responderam"), ("cadastro", "Cadastro")])
 FUNIL_ELAB = [("Disparados", "disparados"), ("Entregues", "entregues"), ("Abriram", "abriram"),
-              ("Clicaram ou responderam", "engajaram"), ("Cadastro na plataforma Brada", "cadastro")]
+              ("Clicaram ou responderam", "engajaram"), ("Assinaram o AprovAI", "cadastro")]
 CANAIS = ["E-mail", "WhatsApp", "E-mail + WhatsApp"]
 
 
@@ -324,7 +351,7 @@ def linhas_elab(leads):
     return BASE_ELAB.agregar(
         (l["dia"], {"canal": sdra.canal_do_lead(l["canais"]), "fonte": l.get("fonte")},
          {"disparados": 1, "entregues": l["abriu"] or not l.get("bounce"), "abriram": l["abriu"],
-          "engajaram": l["engajou"], "cadastro": l["cadastro"]})
+          "engajaram": l["engajou"], "cadastro": l.get("assinou", False)})
         for l in (leads or {}).values())
 
 
@@ -361,6 +388,11 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
                           "ativos vieram do Kiwify sem cobranca"),
             dp.Rosca("Cobrancas do AprovAI no Asaas (foto de hoje)", cobrancas_por_situacao(asaas_rows),
                      subtitulo="Sem testes da equipe"))
+    brenda = sum(l.get("assinou", False) for l in (leads_elab or {}).values())
+    p.linha(dp.Tabela("De onde vieram os assinantes (foto de hoje)", ["Origem gravada no cadastro", "Assinantes"],
+                      [[o, n] for o, n in pre_approvals.get("origens", [])]
+                      + [["Dos quais vieram de um disparo da Brenda", brenda]],
+                      formatos=[None, dp.FMT_INT], spans=[9, 3]))
     aviso_site = ("Contagem do proprio site (cada pagina vista) · o Google Analytics, mais abaixo, conta sessoes"
                   " desde 16/11, por isso da numero menor")
     p.linha(fl.FunilVivo("Site do AprovAI (periodo A)", fs, FUNIL_SITE, altura=340, subtitulo=aviso_site),
@@ -371,7 +403,8 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
                   "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],
                   "aprovai_ativos_app": pre_approvals["total_ativos_no_app"]}
     if elab:
-        resumo_kpi.update({"elaboracao_disparados": elab[0][1], "elaboracao_cadastros": elab[-1][1]})
+        resumo_kpi.update({"elaboracao_disparados": elab[0][1], "elaboracao_engajaram": elab[2][1],
+                           "elaboracao_assinantes": elab[-1][1]})
     extras = []
     if web is not None:
         web_visitas.blocos(p, ctl, "aprovai", web)
@@ -379,7 +412,7 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
     return p, resumo_kpi, [(BASE_SITE, site), (BASE_ELAB, elab_l)] + extras
 
 
-def coletar_elaboracao():
+def coletar_elaboracao(assinaram=frozenset()):
     """(leads, envios) do SDR de elaboracao, ou (None, None) se o banco nao responder."""
     import sdr_automatize as sdra
     try:
@@ -391,7 +424,7 @@ def coletar_elaboracao():
     except (Exception, SystemExit) as e:
         print(f"[aprovai] SDR de elaboracao indisponivel: {str(e)[:160]}")
         return None, None
-    return completar_elaboracao(sdra.por_lead(envios)), envios
+    return completar_elaboracao(sdra.por_lead(envios), assinaram), envios
 
 
 # ===================================================
@@ -435,7 +468,10 @@ def main():
     print("pii_guard: OK (zero hits)")
 
     print("Puxando banco do SDR Brada (so elaboracao)...")
-    leads_elab, envios_elab = coletar_elaboracao()
+    leads_elab, envios_elab = coletar_elaboracao(pre_approvals["lead_ids"])
+    if leads_elab is not None:
+        tabs["raw_elaboracao_assinantes"] = (["lead_id_hash"], [[sync.hash_id(lid)] for lid, l in leads_elab.items()
+                                                                  if l.get("assinou")])
     painel, resumo_kpi, bases = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now,
                                               web_visitas.coletar("aprovai", now.date()))
     print("  resumo:", resumo_kpi)

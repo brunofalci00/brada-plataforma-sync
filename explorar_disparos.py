@@ -50,9 +50,10 @@ TAXAS = [("Entrega", "entregues"), ("Abertura", "abriram"), ("Clique ou resposta
 def etapas_do_envio(e):
     """Cada etapa conta o envio que chegou nela ou alem: o funil nunca sobe.
 
-    Resultado do Incentivador = reuniao (o card do HubSpot nasce sozinho ao abrir a agenda, nao e resultado);
-    das outras frentes = cadastro."""
-    resultado = e.get("reuniao", False) if e["modalidade"] == sdr.INCENTIVADOR else e["cadastro"]
+    Resultado de cada frente (decisoes de 23/11): Incentivador = reuniao (o card do HubSpot nasce sozinho ao
+    abrir a agenda); Elaboracao = assinou o AprovAI; Plataforma = cadastro."""
+    resultado = {sdr.INCENTIVADOR: e.get("reuniao", False),
+                 sdr.ELABORACAO: e.get("assinou", False)}.get(e["modalidade"], e["cadastro"])
     engajou = e["clicou"] or e["respondeu"] or e["agenda"] or e["card"] or e["cadastro"]
     abriu = e["abriu"] or engajou
     return {"envios": 1, "entregues": int(abriu or not e["bounce"]), "abriram": int(abriu),
@@ -127,11 +128,11 @@ def montar_painel(linhas_base, agora, foto=(), saude=None):
             fl.CartaoVivo("Taxa de abertura", flt.taxa("abriram", "A"), flt.taxa("abriram", "B"), dp.FMT_PCT),
             fl.CartaoVivo("Taxa de resultado", flt.taxa("resultado", "A"), flt.taxa("resultado", "B"), dp.FMT_PCT))
     p.linha(fl.FunilVivo("Funil do período A", flt, FUNIL,
-                         "Resultado: reuniao (Incentivador) ou cadastro (Elaboracao e Plataforma)"),
+                         "Resultado: reuniao (Incentivador), assinatura do AprovAI (Elaboracao) ou cadastro (Plataforma)"),
             fl.RoscaViva("Envios por frente no período A",
                          [(n, F(flt.soma_p("envios", frente=n))) for _, n in FRENTES],
                          subtitulo="a mesma IA dispara para as três"))
-    p.linha(fl.comparacao_ab("Período A contra período B", flt, FUNIL))
+    p.linha(fl.comparacao_ab("Período A contra período B", flt, FUNIL, maturacao=fl.MATURACAO_DIAS))
     p.linha(fl.SerieViva("Envios no período A", ["Dia"] + [n for _, n in FRENTES],
                          [[F(flt.sequencia())] + [F(flt.por_ponto("envios", frente=n)) for _, n in FRENTES]],
                          n_linhas=MAX_PONTOS, formato_dominio=dp.FMT_DIA, empilhado=True, rotulos=False,
@@ -253,6 +254,17 @@ def leads_com_reuniao(sh, aba="raw_disparo_incentivador"):
     return frozenset(l[i] for l in linhas[1:] if len(l) > j and l[j] == "sim")
 
 
+def hashes_da_aba(sh, aba):
+    """Coluna lead_id_hash de uma aba escondida gravada por outro sync que roda antes no CI."""
+    import gspread
+    try:
+        linhas = sh.worksheet(aba).get_all_values()
+    except gspread.exceptions.WorksheetNotFound:
+        print(f"[AVISO] {aba} ausente: o resultado dessa frente sai como 0 na aba Brenda")
+        return frozenset()
+    return frozenset(l[0] for l in linhas[1:] if l and l[0])
+
+
 def publicar_base(sh, svc, spreadsheet_id, linhas):
     BASE.publicar(sh, svc, spreadsheet_id, linhas)
 
@@ -268,7 +280,9 @@ def main():
         conn.close()
     sh = sync.get_sheets_client().open_by_key(sync.SPREADSHEET_ID)
     reunioes = leads_com_reuniao(sh)
-    envios = [dict(e, reuniao=e.get("lead_hash") in reunioes) for e in envios]
+    assinaram = hashes_da_aba(sh, "raw_elaboracao_assinantes")
+    envios = [dict(e, reuniao=e.get("lead_hash") in reunioes, assinou=e.get("lead_hash") in assinaram)
+              for e in envios]
     linhas = base(envios)
     svc = sync.build_sheets_service()
     renomear_abas_antigas(sh, svc, sync.SPREADSHEET_ID)

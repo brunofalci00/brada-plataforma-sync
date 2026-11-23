@@ -44,7 +44,7 @@ def _credenciais():
 
 
 def _docs(db, colecao):
-    return [d.to_dict() or {} for d in db.collection(colecao).stream()]
+    return [dict(d.to_dict() or {}, _id=d.id) for d in db.collection(colecao).stream()]
 
 
 def _contas_auth(creds):
@@ -137,7 +137,7 @@ def calcular(dados, agora_ms):
         "login_7d": sum(1 for a in auth if dias_desde(a, "lastLoginAt") <= 7),
         "login_30d": sum(1 for a in auth if dias_desde(a, "lastLoginAt") <= 30),
         "voltaram_7d": _taxa(len(voltaram_7d), len(elegiveis_7d)),
-        "primeira_acao": sum(acoes.values()),
+        "primeira_acao": len(primeiras_acoes(dados)),
         "acao_evento": acoes.get("event_external_click", 0),
         "posts": len(dados["community_posts"]),
         "conexoes_aceitas": conexoes.get("accepted", 0),
@@ -214,6 +214,29 @@ def _perfil(papel):
     return PERFIS.get(str(papel or "").strip().lower(), "Sem perfil")
 
 
+def membro_do_evento(e):
+    """userId do evento (desde 23/11 o site manda; antes nao vinha). Vazio = evento antigo, sem membro."""
+    det = e.get("details") if isinstance(e.get("details"), dict) else {}
+    return str(e.get("userId") or e.get("user_id") or det.get("userId") or det.get("user_id") or "")
+
+
+def primeiras_acoes(dados):
+    """[(dia, papel)] de primeira acao: 1 por membro (a mais antiga) quando o evento traz o userId, sem a
+    equipe; evento antigo sem userId conta 1 por evento, como antes. O papel vem do evento ou do cadastro."""
+    usuarios = {u.get("_id"): u for u in dados["users"] if u.get("_id")}
+    vistos, out = set(), []
+    eventos = [e for e in dados["activation_events"] if e.get("event") == "first_relevant_action"]
+    for e in sorted(eventos, key=lambda e: _texto_data(e.get("timestamp"))):
+        uid = membro_do_evento(e)
+        u = usuarios.get(uid, {})
+        if uid and (uid in vistos or (u and e_equipe(u))):
+            continue
+        if uid:
+            vistos.add(uid)
+        out.append((_dia(e.get("timestamp")), e.get("role") or e.get("user_role") or u.get("role")))
+    return out
+
+
 def linhas_base(dados):
     """Cada evento na data em que aconteceu, pelo perfil. Os eventos nao trazem o membro, entao nao
     da para seguir a mesma pessoa do cadastro a primeira acao: sao contagens do periodo, nao coorte."""
@@ -222,9 +245,10 @@ def linhas_base(dados):
             if not e_equipe(u):
                 yield _dia(u.get("createdAt")), {"perfil": _perfil(u.get("role"))}, {"cadastros": 1}
         for e in dados["activation_events"]:
-            etapa = {"first_relevant_action": "acoes", "profile_completed": "perfis"}.get(e.get("event"))
-            if etapa:
-                yield _dia(e.get("timestamp")), {"perfil": _perfil(e.get("role"))}, {etapa: 1}
+            if e.get("event") == "profile_completed":
+                yield _dia(e.get("timestamp")), {"perfil": _perfil(e.get("role"))}, {"perfis": 1}
+        for dia, papel in primeiras_acoes(dados):
+            yield dia, {"perfil": _perfil(papel)}, {"acoes": 1}
     return BASE_COM.agregar(registros())
 
 
@@ -240,7 +264,7 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
     p.linha(ctl)
     p.linha(fl.CartaoVivo("Cadastros", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
             fl.CartaoVivo("Perfis completos", flt.soma_p("perfis", "A"), flt.soma_p("perfis", "B")),
-            fl.CartaoVivo("Primeiras acoes (eventos, nao pessoas)", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
+            fl.CartaoVivo("Primeiras acoes (1 por membro desde 23/11)", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
             fl.CartaoVivo("Perfis completos por cadastro", flt.taxa("perfis", "A"), flt.taxa("perfis", "B"),
                           dp.FMT_PCT))
     p.linha(fl.comparacao_ab("Periodo A contra periodo B (cada evento na data em que aconteceu)", flt, ETAPAS_COM))

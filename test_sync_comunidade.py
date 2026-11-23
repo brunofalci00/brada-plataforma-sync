@@ -128,3 +128,15 @@ def test_painel_com_ga_tem_tabela_de_telas_e_retorno_no_resumo():
     assert tabela.linhas[0] == ["Entrar ou Criar Conta", 50.0]
     assert resumo["comunidade_retorno"] == 0.25
     assert sc.resumo_ga(None) is None
+
+
+def test_primeira_acao_conta_uma_por_membro_quando_o_evento_traz_o_userid():
+    dados = {"users": [{"_id": "u1", "role": "idealizador"}, {"_id": "eq", "role": "admin"}],
+             "activation_events": [
+                 {"event": "first_relevant_action", "timestamp": "2026-11-24T10:00:00Z", "userId": "u1"},
+                 {"event": "first_relevant_action", "timestamp": "2026-11-24T11:00:00Z", "userId": "u1"},
+                 {"event": "first_relevant_action", "timestamp": "2026-11-24T12:00:00Z", "userId": "eq"},
+                 {"event": "first_relevant_action", "timestamp": "2026-11-20T12:00:00Z"}]}
+    acoes = sc.primeiras_acoes(dados)
+    assert len(acoes) == 2  # u1 uma vez, a equipe fora, o evento antigo sem membro fica
+    assert ("idealizador" in [p for _, p in acoes])
