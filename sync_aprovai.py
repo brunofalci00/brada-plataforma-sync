@@ -336,43 +336,22 @@ def _visitas_vivas(fsite):
 
 
 def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora, web=None):
-    """Filtros no topo; Brenda (elaboracao) e site, vivos pelo periodo, lado a lado e sem ligacao
-    (o link do disparo nao tem UTM e o site nao grava origem); depois a foto de hoje."""
+    """Aba do produto: abre pelo Asaas (quem paga e quanto), depois o site e as visitas.
+    O SDR de elaboracao (Brenda) nao aparece aqui: mora na aba Brenda; so os numeros dele seguem
+    para a Visao Geral pelo resumo."""
     hoje = agora.date()
     app = funil_app(funil_rows, resumo)
     site, elab_l = linhas_site(funil_rows), linhas_elab(leads_elab)
-    canais = [c for c in CANAIS if c in BASE_ELAB.opcoes(elab_l, "canal")] or CANAIS[:1]
-    ctl = fl.controles(ABA, hoje, [fl.campo_lista("canal", "Canal da Brenda", canais, todos=fl.TODOS, span=2),
-                                   fl.campo_lista("fonte", "Fonte do lead", BASE_ELAB.opcoes(elab_l, "fonte"),
-                                                  span=2)])
-    fe, fs = fl.Filtros(ctl, BASE_ELAB), fl.Filtros(ctl, BASE_SITE)
-    p = dp.Painel(ABA, "AprovAI · do disparo de elaboracao e da visita ao assinante",
-                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + Firestore do app + Asaas"
+    ctl = fl.controles(ABA, hoje)
+    fs = fl.Filtros(ctl, BASE_SITE)
+    p = dp.Painel(ABA, "AprovAI · do visitante ao assinante pagante",
+                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Asaas + Firestore do app + Google Analytics"
                   " · mude as células claras abaixo")
     p.linha(ctl)
-    p.linha(fl.CartaoVivo("Brenda: leads disparados", fe.soma_p("disparados", "A"), fe.soma_p("disparados", "B")),
-            fl.CartaoVivo("Brenda: cadastros", fe.soma_p("cadastro", "A"), fe.soma_p("cadastro", "B")),
-            fl.CartaoVivo("Site: visitas", fs.soma_p("visitas", "A"), fs.soma_p("visitas", "B")),
+    p.linha(dp.Cartao("Assinantes pagando (Asaas, hoje)", resumo["assinantes_reais_ativos"]),
+            dp.Cartao("Receita recorrente (MRR, Asaas, hoje)", resumo["mrr_real"], dp.FMT_BRL),
+            fl.CartaoVivo("Site: visitas a pagina", fs.soma_p("visitas", "A"), fs.soma_p("visitas", "B")),
             fl.CartaoVivo("Site: leads", fs.soma_p("leads", "A"), fs.soma_p("leads", "B")))
-    p.linha(fl.FunilVivo("Brenda: SDR de elaboracao (periodo A)", fe, FUNIL_ELAB, altura=340,
-                         subtitulo="Leads na data do 1o disparo · filtros de canal e fonte"),
-            fl.FunilVivo("Site do AprovAI (periodo A)", fs, FUNIL_SITE, altura=340,
-                         subtitulo="Todas as origens · o site nao grava UTM, nao liga ao disparo"))
-    p.linha(fl.comparacao_ab("Brenda: periodo A contra periodo B", fe, FUNIL_ELAB))
-    p.linha(fl.comparacao_ab("Site: periodo A contra periodo B", fs, FUNIL_SITE))
-    p.linha(fl.evolucao("Brenda: leads disparados no periodo A", fe, "disparados", "canal", canais,
-                        subtitulo="Por dia ou semana, empilhado por canal"), _visitas_vivas(fs))
-    recentes = hoje - datetime.timedelta(days=2 * fl.JANELA_PADRAO - 1)
-    fontes = BASE_ELAB.opcoes(elab_l, "fonte", desde=recentes)
-    if fontes:
-        p.linha(fl.por_dimensao("Brenda por fonte do lead (periodo A)", fe, "fonte", fontes, [
-            ("Disparados", "soma", "disparados"), ("Abertura", "taxa", "abriram"),
-            ("Engajamento", "taxa", "engajaram"), ("Cadastros", "soma", "cadastro"),
-            ("Taxa cadastro", "taxa", "cadastro")], gradiente=[1, 5], cabecalho_dim="Fonte"))
-    p.linha(dp.Tabela("Anuncios (aguardando dado)", ["Etapa", "Situacao"], [
-        ["Investimento, impressoes e cliques", "Falta acesso de leitura ao Meta Ads"],
-        ["Visita com origem do anuncio", "Falta o site gravar a UTM em analytics_funnel_events"],
-        ["Custo por lead e por assinante", "Depende das duas linhas acima"]]))
     p.linha(dp.Funil("Quem e assinante de verdade (foto de hoje, sem filtro)", [
                 ("Marcados como ativos no app", pre_approvals["total_ativos_no_app"]),
                 ("Com assinatura registrada", pre_approvals["com_billing_asaas_real"]),
@@ -381,6 +360,15 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
                           "ativos vieram do Kiwify sem cobranca"),
             dp.Rosca("Cobrancas do AprovAI no Asaas (foto de hoje)", cobrancas_por_situacao(asaas_rows),
                      subtitulo="Sem testes da equipe"))
+    aviso_site = ("Contagem do proprio site (cada pagina vista) · o Google Analytics, mais abaixo, conta sessoes"
+                  " desde 16/11, por isso da numero menor")
+    p.linha(fl.FunilVivo("Site do AprovAI (periodo A)", fs, FUNIL_SITE, altura=340, subtitulo=aviso_site),
+            _visitas_vivas(fs))
+    p.linha(fl.comparacao_ab("Site: periodo A contra periodo B", fs, FUNIL_SITE))
+    p.linha(dp.Tabela("Anuncios (aguardando dado)", ["Etapa", "Situacao"], [
+        ["Investimento, impressoes e cliques", "Falta acesso de leitura ao Meta Ads"],
+        ["Visita com origem do anuncio", "Falta o site gravar a UTM em analytics_funnel_events"],
+        ["Custo por lead e por assinante", "Depende das duas linhas acima"]]))
     elab = funil_elaboracao(leads_elab) if leads_elab is not None else None
     resumo_kpi = {"aprovai_visitas": app[0][1], "aprovai_leads": app[2][1],
                   "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],
