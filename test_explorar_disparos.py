@@ -17,8 +17,11 @@ def _e(modalidade, dia, canal="email", fonte="salic", **marcas):
 
 def test_etapa_conta_quem_chegou_nela_ou_alem():
     card = ex.etapas_do_envio(_e(sdr.INCENTIVADOR, D(2026, 11, 3), card=True))
-    assert card == {"envios": 1, "entregues": 1, "abriram": 1, "engajaram": 1, "responderam": 0, "resultado": 1}
-    # cadastro nao e resultado do Incentivador, card nao e resultado das outras frentes
+    assert card == {"envios": 1, "entregues": 1, "abriram": 1, "engajaram": 1, "responderam": 0, "resultado": 0}
+    # o card nasce sozinho ao abrir a agenda: resultado do Incentivador e reuniao (HubSpot)
+    reuniao = dict(_e(sdr.INCENTIVADOR, D(2026, 11, 3), card=True), reuniao=True)
+    assert ex.etapas_do_envio(reuniao)["resultado"] == 1
+    # cadastro nao e resultado do Incentivador
     assert ex.etapas_do_envio(_e(sdr.INCENTIVADOR, D(2026, 11, 3), cadastro=True))["resultado"] == 0
     assert ex.etapas_do_envio(_e(sdr.APTOS, D(2026, 11, 3), cadastro=True))["resultado"] == 1
     assert ex.etapas_do_envio(_e(sdr.APTOS, D(2026, 11, 3), bounce=True))["entregues"] == 0
@@ -68,7 +71,7 @@ def test_divisao_por_semana_e_fila_da_visao_geral():
     assert ex.divisao_por_semana(envios, D(2026, 11, 12), n=2) == [["02/11", 0, 0, 1], ["09/11", 1, 0, 1]]
     fila = {sdr.ELABORACAO: {"enviados": 0, "na_fila": 239, "canal_fila": "whatsapp"}}
     linhas = ex.linhas_fila(envios, fila, D(2026, 11, 12), janela=28)
-    assert linhas[1] == ["AprovAI", 0, 0, 239, "WhatsApp"] and linhas[2][1] == 2 / 28
+    assert linhas[1] == ["Elaboracao", 0, 0, 239, "WhatsApp"] and linhas[2][1] == 2 / 28
     assert len(ex.componentes_visao_geral(envios, fila, D(2026, 11, 12))) == 2
 
 
@@ -89,7 +92,7 @@ def test_saude_marca_frente_parada_por_dias_uteis():
            {"modalidade": s.APTOS, "dia": hoje, "canal": "email"}]
     linhas = {l[0]: l for l in ex.linhas_saude(env, hoje, fila={})}
     assert linhas["Incentivador"][2:] == [3, 1, 0, "PARADA"]  # sexta 13 > seg, ter, qua
-    assert linhas["Plataforma"][-1] == "Disparando" and linhas["AprovAI"][-1] == "SEM ENVIO"
+    assert linhas["Plataforma"][-1] == "Disparando" and linhas["Elaboracao"][-1] == "SEM ENVIO"
 
 
 def test_cartao_de_contagem_nao_compara_base_pequena():
@@ -98,3 +101,8 @@ def test_cartao_de_contagem_nao_compara_base_pequena():
     c = fl.CartaoVivo("x", "A1", "B1")
     assert "B1)<20" in str(c.bloco()[1][2])
     assert "B1)=0" in str(fl.CartaoVivo("t", "A1", "B1", dp.FMT_PCT).bloco()[1][2])
+
+
+def test_hash_do_lead_bate_com_o_do_sync():
+    import sync
+    assert sdr.hash_lead("abc-123") == sync.hash_id("abc-123") and sdr.hash_lead(None) == ""

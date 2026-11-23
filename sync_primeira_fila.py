@@ -153,15 +153,15 @@ BASE_HUNTER = fl.Base("base_pf_hunter", [("cidade", "Cidade", fl.TODAS), ("categ
 FUNIL_HUNTER = [("Espacos captados", "captados"), ("Abordados", "abordados"), ("Responderam", "responderam"),
                 ("Link enviado", "link"), ("Clicaram no link", "clicou"), ("Cadastraram", "cadastrou")]
 BASE_DEMANDA = fl.Base("base_pf_demanda", [("cidade", "Cidade", fl.TODAS)], [
-    ("cliques", "Cliques em anuncios"), ("conversas", "Conversas"), ("pedidos", "Pedidos de reserva"),
+    ("cliques", "Cliques nos espacos"), ("conversas", "Conversas"), ("pedidos", "Pedidos de reserva"),
     ("pagas", "Reservas pagas")])
-FUNIL_DEMANDA = [("Cliques em anuncios", "cliques"), ("Conversas no chat", "conversas"),
+FUNIL_DEMANDA = [("Cliques nos espacos do guia", "cliques"), ("Conversas no chat", "conversas"),
                  ("Pedidos de reserva", "pedidos"), ("Reservas pagas", "pagas")]
 # Jornada ponta a ponta: visitas e paginas vem do GA4 (sem cidade), o resto do banco.
 BASE_JORNADA = fl.Base("base_pf_jornada", [("cidade", "Cidade", fl.TODAS)], [
     ("visitas", "Visitas ao site"), ("pag_espaco", "Sessoes em pagina de espaco"),
     ("pag_cadastro", "Sessoes no criar conta"), ("perfis", "Perfis de anfitriao"),
-    ("espacos", "Espacos cadastrados"), ("no_guia", "Espacos no guia hoje"), ("cliques", "Cliques em anuncios"),
+    ("espacos", "Espacos cadastrados"), ("no_guia", "Espacos no guia hoje"), ("cliques", "Cliques nos espacos"),
     ("conversas", "Conversas"), ("pedidos", "Pedidos de reserva"), ("pagas", "Reservas pagas")])
 JORNADA_ANFITRIAO = [("Visitas ao site", "visitas"), ("Viram pagina de espaco", "pag_espaco"),
                      ("Abriram o criar conta", "pag_cadastro"), ("Perfis de anfitriao", "perfis"),
@@ -317,38 +317,33 @@ def montar_painel(dados, agora, web=None):
     fh, fd, fj = fl.Filtros(ctl, BASE_HUNTER), fl.Filtros(ctl, BASE_DEMANDA), fl.Filtros(ctl, BASE_JORNADA)
     painel = dp.Painel(ABA, "Primeira Fila · do espaco captado a reserva paga",
                        f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco da Primeira Fila"
-                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · mude as células claras abaixo")
+                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · custo por anfitriao entra quando a campanha da Meta rodar com UTM · mude as células claras abaixo")
     painel.linha(ctl)
-    painel.linha(fl.CartaoVivo("Hunter: espacos captados", fh.soma_p("captados", "A"), fh.soma_p("captados", "B")),
-                 fl.CartaoVivo("Hunter: cadastraram", fh.soma_p("cadastrou", "A"), fh.soma_p("cadastrou", "B")),
-                 fl.CartaoVivo(f"Cliques em anuncios (metodo mudou em {MUDANCA_CLIQUES})", fd.soma_p("cliques", "A"),
-                               fd.soma_p("cliques", "B")),
+    painel.linha(fl.CartaoVivo("Visitas ao site (desde 17/11)", fj.soma_p("visitas", "A"), fj.soma_p("visitas", "B")),
+                 fl.CartaoVivo(f"Cliques nos espacos do guia (contagem mudou em {MUDANCA_CLIQUES})",
+                               fd.soma_p("cliques", "A"), fd.soma_p("cliques", "B")),
+                 fl.CartaoVivo("Hunter: espacos captados", fh.soma_p("captados", "A"), fh.soma_p("captados", "B")),
                  fl.CartaoVivo("Reservas pagas", fd.soma_p("pagas", "A"), fd.soma_p("pagas", "B")))
-    aviso = "Conta so a partir de 17/11, quando o GA4 comecou · com Cidade = Todas"
-    painel.linha(fl.FunilVivo("Jornada do anfitriao: da visita ao espaco no guia (periodo A)", fj, JORNADA_ANFITRIAO,
-                              altura=380, subtitulo=aviso),
-                 fl.FunilVivo("Jornada do produtor: da visita a reserva paga (periodo A)", fj, JORNADA_PRODUTOR,
-                              altura=380, subtitulo=aviso))
-    painel.linha(fl.comparacao_ab("Jornada do anfitriao: periodo A contra periodo B", fj, JORNADA_ANFITRIAO))
-    painel.linha(fl.comparacao_ab("Jornada do produtor: periodo A contra periodo B", fj, JORNADA_PRODUTOR))
+    painel.linha(fl.FunilVivo("Quem quer anunciar (anfitriao): da pagina de espaco ao guia (periodo A)", fj,
+                              JORNADA_ANFITRIAO[1:], altura=360,
+                              subtitulo="O site nao separa os publicos nas visitas: o anfitriao comeca a se separar "
+                                        "no criar conta · desde 17/11 · Cidade = Todas"),
+                 fl.FunilVivo("Quem quer reservar (produtor): do clique no espaco a reserva paga (periodo A)", fd,
+                              FUNIL_DEMANDA, altura=360,
+                              subtitulo="Cada etapa na data em que aconteceu · so o filtro de cidade vale aqui"))
+    painel.linha(fl.comparacao_ab("Reservas: periodo A contra periodo B", fd, FUNIL_DEMANDA))
     painel.linha(fl.FunilVivo("Anfitriao: Hunter da captacao ao cadastro (periodo A)", fh, FUNIL_HUNTER, altura=360,
                               subtitulo="Espacos na data da captacao · etapas = estado de hoje"),
-                 fl.FunilVivo("Demanda: do clique a reserva paga (periodo A)", fd, FUNIL_DEMANDA, altura=360,
-                              subtitulo="Cada etapa na data em que aconteceu · so o filtro de cidade vale aqui"))
-    painel.linha(fl.comparacao_ab("Hunter: periodo A contra periodo B", fh, FUNIL_HUNTER))
-    painel.linha(fl.comparacao_ab("Demanda: periodo A contra periodo B", fd, FUNIL_DEMANDA))
-    painel.linha(fl.evolucao("Hunter: espacos captados no periodo A", fh, "captados", "canal", canais,
-                             subtitulo="Por dia ou semana, empilhado pelo canal da abordagem"),
-                 fl.evolucao("Demanda: cliques em anuncios no periodo A", fd, "cliques", "cidade", cidades[:6],
+                 fl.evolucao("Cliques nos espacos do guia no periodo A", fd, "cliques", "cidade", cidades[:6],
                              subtitulo="Por dia ou semana, empilhado pelas 6 cidades com mais volume"))
+    pl, resumo_produtor = pf_produtor.blocos(painel, ctl, dados)
     recentes = hoje - datetime.timedelta(days=2 * fl.JANELA_PADRAO - 1)
-    painel.linha(fl.por_dimensao("Hunter por cidade (periodo A)", fh, "cidade",
+    painel.linha(fl.por_dimensao("Detalhe: Hunter por cidade (periodo A)", fh, "cidade",
                                  BASE_HUNTER.opcoes(hl, "cidade", desde=recentes) or cidades[:1], [
         ("Captados", "soma", "captados"), ("Abordados", "taxa", "abordados"), ("Responderam", "taxa", "responderam"),
         ("Clicaram no link", "soma", "clicou"), ("Cadastraram", "soma", "cadastrou")],
         gradiente=[1], cabecalho_dim="Cidade"))
     pf_cruzamentos.blocos(painel, fh, canais, dados.get("oferta_local", []), (web or {}).get("consultas", []))
-    pl, resumo_produtor = pf_produtor.blocos(painel, ctl, dados)
     painel.linha(dp.Cartao("Espacos no ar (hoje)", e["no_ar"]), dp.Cartao("Anfitrioes (hoje)", a["perfis"]),
                  dp.Cartao("Reservas pagas (desde o lancamento)", r["pagas"]),
                  dp.Cartao("Valor pago (desde o lancamento)", r["valor_pago"], dp.FMT_BRL))

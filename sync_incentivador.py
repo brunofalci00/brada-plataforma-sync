@@ -81,7 +81,7 @@ def funil(leads):
 DIAS_PARADO = 7  # card em aberto ha mais que isso no mesmo estagio conta como parado
 SEM_DONO = "(sem dono)"
 CAB_EXECUTIVOS = ["Executivo", "Cards", "Em aberto", "Parados 7+ dias", "Dias parado",
-                  "Reuniao+", "Ganho", "Perdido", "Card ate reuniao"]
+                  "Reuniao+", "Ganho", "Perdido", "% virou reuniao"]
 
 
 def _data(iso):
@@ -124,16 +124,13 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + HubSpot ao vivo · "
                   "leads contados na data do 1o disparo; mude as células claras abaixo")
     p.linha(ctl)
-    if envios is not None:
-        import explorar_disparos as ex
-        p.linha(ex.tabela_saude(envios, agora.date(), [(sdra.INCENTIVADOR, "Incentivador")]))
 
     def ab(etapa):
         return flt.soma_p(etapa, "A"), flt.soma_p(etapa, "B")
 
     p.linha(fl.CartaoVivo("Leads disparados", *ab("disparados")),
             fl.CartaoVivo("Clicaram ou responderam", *ab("engajaram")),
-            fl.CartaoVivo("Reuniao ou alem", *ab("reuniao")),
+            fl.CartaoVivo("Reunioes (leads disparados no periodo)", *ab("reuniao")),
             fl.CartaoVivo("Disparo ate reuniao", flt.taxa("reuniao", "A"), flt.taxa("reuniao", "B"), dp.FMT_PCT))
     d, e, ag, r = (flt.soma_p(k) for k in ("disparados", "engajaram", "agenda", "reuniao"))
     p.linha(fl.FunilVivo("Do disparo ao ganho (periodo A)", flt, FUNIL_VIVO, altura=360,
@@ -148,7 +145,7 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
         p.linha(dp.Cartao("Cards da Brenda no HubSpot", cards),
                 dp.Cartao("Sem executivo dono", sem_dono),
                 dp.Cartao(f"Em aberto parados {DIAS_PARADO}+ dias", sum(r[3] for r in executivos)),
-                dp.Cartao("Card ate reuniao", sum(r[5] for r in executivos) / cards if cards else 0, formato=dp.FMT_PCT))
+                dp.Cartao("Cards que chegaram a reuniao", sum(r[5] for r in executivos)))
         p.linha(dp.Tabela("Cobranca por executivo: cards da Brenda (foto de hoje, sem filtro)", CAB_EXECUTIVOS,
                           executivos, formatos=[None] + [dp.FMT_INT] * 7 + [dp.FMT_PCT], gradiente=[3]))
     p.linha(fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO))
@@ -166,7 +163,9 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
     etapas = funil(leads)
     resumo = {"incentivador_disparados": etapas[0][1], "incentivador_engajaram": etapas[1][1],
               "incentivador_cards": etapas[2][1],
-              "incentivador_reuniao": etapas[-1][1], "incentivador_pipeline_reuniao": len(hs["rows"])}
+              "incentivador_reuniao": etapas[-1][1], "incentivador_pipeline_reuniao": len(hs["rows"]),
+              # mesmo numero do cartao "Cards que chegaram a reuniao" (por card, inclui lead fora da base de envios)
+              "incentivador_cards_reuniao": sum(r[5] for r in executivos) if executivos else etapas[-1][1]}
     return p, resumo, linhas
 
 

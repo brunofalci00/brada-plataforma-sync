@@ -54,13 +54,11 @@ def cruzar_local(oferta, consultas):
 def blocos(painel, fh, canais, oferta, consultas):
     linhas = cruzar_local(oferta, consultas)
     if linhas:
-        painel.linha(dp.Tabela("Busca no Google x espacos no guia, por local (ultimos 28 dias, so buscas visiveis)",
+        painel.linha(dp.Tabela("Detalhe: busca no Google x espacos no guia, por local (ultimos 28 dias, so buscas visiveis)",
                                ["Local", "Tipo", "Aparicoes", "Cliques", "Espacos no guia", "Leitura"], linhas,
                                formatos=[None, None, dp.FMT_INT, dp.FMT_INT, dp.FMT_INT, None], gradiente=[2]))
-    painel.linha(fl.por_dimensao("Hunter por canal: quem chega ao cadastro (periodo A)", fh, "canal", canais, [
+    painel.linha(fl.por_dimensao("Detalhe: Hunter por canal, quem chega ao cadastro (periodo A)", fh, "canal", canais, [
         ("Captados", "soma", "captados"), ("Responderam", "taxa", "responderam"),
         ("Clicaram no link", "taxa", "clicou"), ("Cadastraram", "soma", "cadastrou"),
         ("Cadastro / captado", "taxa", "cadastrou")], gradiente=[4], cabecalho_dim="Canal"))
-    painel.linha(dp.Tabela("Custo por anfitriao", ["Canal pago", "Situacao"], [
-            ["Meta (anuncios)", "Entra com a campanha"],
-            ["Google Ads", "Sem campanha"]]))
+

@@ -346,6 +346,7 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
     fs = fl.Filtros(ctl, BASE_SITE)
     p = dp.Painel(ABA, "AprovAI · do visitante ao assinante pagante",
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Asaas + Firestore do app + Google Analytics"
+                  " · anuncios e custo por assinante entram quando houver acesso ao Meta Ads e UTM no site"
                   " · mude as células claras abaixo")
     p.linha(ctl)
     p.linha(dp.Cartao("Assinantes pagando (Asaas, hoje)", resumo["assinantes_reais_ativos"]),
@@ -365,10 +366,6 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
     p.linha(fl.FunilVivo("Site do AprovAI (periodo A)", fs, FUNIL_SITE, altura=340, subtitulo=aviso_site),
             _visitas_vivas(fs))
     p.linha(fl.comparacao_ab("Site: periodo A contra periodo B", fs, FUNIL_SITE))
-    p.linha(dp.Tabela("Anuncios (aguardando dado)", ["Etapa", "Situacao"], [
-        ["Investimento, impressoes e cliques", "Falta acesso de leitura ao Meta Ads"],
-        ["Visita com origem do anuncio", "Falta o site gravar a UTM em analytics_funnel_events"],
-        ["Custo por lead e por assinante", "Depende das duas linhas acima"]]))
     elab = funil_elaboracao(leads_elab) if leads_elab is not None else None
     resumo_kpi = {"aprovai_visitas": app[0][1], "aprovai_leads": app[2][1],
                   "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],

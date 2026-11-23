@@ -1,6 +1,6 @@
 """Aba "Brenda" (antes "Explorar disparos"): o SDR da Automatize nas tres frentes, com filtros.
 
-A mesma IA dispara para as tres frentes (Incentivador, AprovAI/elaboracao e
+A mesma IA dispara para as tres frentes (Incentivador, Elaboracao e
 Plataforma/aptos). A aba escondida `base_disparos` guarda os envios agregados por
 dia x frente x canal x fonte (sem lead, sem PII). No topo da aba ficam as celulas
 de filtro (periodo A, periodo B para comparar, frente, canal, fonte, agrupamento);
@@ -25,7 +25,7 @@ from painel_filtros import F, MAX_PONTOS, literal, seguro  # noqa: F401  (API us
 ABA = "Brenda"
 ABA_ANTIGA = "Explorar disparos"
 ABA_BASE = "base_disparos"
-FRENTES = [(sdr.INCENTIVADOR, "Incentivador"), (sdr.ELABORACAO, "AprovAI"), (sdr.APTOS, "Plataforma")]
+FRENTES = [(sdr.INCENTIVADOR, "Incentivador"), (sdr.ELABORACAO, "Elaboracao"), (sdr.APTOS, "Plataforma")]
 NOME_FRENTE = dict(FRENTES)
 CANAIS = [("email", "E-mail"), ("whatsapp", "WhatsApp")]
 SEM_FONTE = fl.SEM_VALOR
@@ -48,8 +48,11 @@ TAXAS = [("Entrega", "entregues"), ("Abertura", "abriram"), ("Clique ou resposta
 # ---------- base (Python) ----------
 
 def etapas_do_envio(e):
-    """Cada etapa conta o envio que chegou nela ou alem: o funil nunca sobe."""
-    resultado = e["card"] if e["modalidade"] == sdr.INCENTIVADOR else e["cadastro"]
+    """Cada etapa conta o envio que chegou nela ou alem: o funil nunca sobe.
+
+    Resultado do Incentivador = reuniao (o card do HubSpot nasce sozinho ao abrir a agenda, nao e resultado);
+    das outras frentes = cadastro."""
+    resultado = e.get("reuniao", False) if e["modalidade"] == sdr.INCENTIVADOR else e["cadastro"]
     engajou = e["clicou"] or e["respondeu"] or e["agenda"] or e["card"] or e["cadastro"]
     abriu = e["abriu"] or engajou
     return {"envios": 1, "entregues": int(abriu or not e["bounce"]), "abriram": int(abriu),
@@ -124,7 +127,7 @@ def montar_painel(linhas_base, agora, foto=(), saude=None):
             fl.CartaoVivo("Taxa de abertura", flt.taxa("abriram", "A"), flt.taxa("abriram", "B"), dp.FMT_PCT),
             fl.CartaoVivo("Taxa de resultado", flt.taxa("resultado", "A"), flt.taxa("resultado", "B"), dp.FMT_PCT))
     p.linha(fl.FunilVivo("Funil do período A", flt, FUNIL,
-                         "Resultado: card no HubSpot (Incentivador) ou cadastro (AprovAI e Plataforma)"),
+                         "Resultado: reuniao (Incentivador) ou cadastro (Elaboracao e Plataforma)"),
             fl.RoscaViva("Envios por frente no período A",
                          [(n, F(flt.soma_p("envios", frente=n))) for _, n in FRENTES],
                          subtitulo="a mesma IA dispara para as três"))
@@ -188,6 +191,16 @@ def linhas_saude(envios, hoje, frentes=None, fila=None):
     return out
 
 
+def resumo_saude(envios, hoje):
+    """Chaves brenda_<frente>_dias_sem_envio e _envios_7d para o alerta da Visao Geral."""
+    out = {}
+    for (m, nome), linha in zip(FRENTES, linhas_saude(envios, hoje)):
+        chave = dp.slug(nome)
+        out[f"brenda_{chave}_dias_sem_envio"] = linha[2] if isinstance(linha[2], int) else 99
+        out[f"brenda_{chave}_envios_7d"] = linha[3]
+    return out
+
+
 def tabela_saude(envios, hoje, frentes=None, fila=None,
                  titulo=f"A Brenda esta disparando? (hoje, sem filtro · PARADA = mais de {LIMITE_PARADA} dias uteis sem envio)"):
     cab = ["Frente", "Ultimo envio", "Dias uteis sem envio", "Envios em 7 dias"] + (
@@ -228,6 +241,22 @@ def renomear_abas_antigas(sh, svc, spreadsheet_id):
         print(f"  {len(reqs)} aba(s) renomeada(s) para '{ABA}'")
 
 
+def leads_com_reuniao(sh, aba="raw_disparo_incentivador"):
+    """Hashes dos leads do Incentivador cujo card ja passou por reuniao (HubSpot ao vivo, gravado pela aba
+    Incentivador, que roda antes no CI). Sem a aba, ninguem conta como reuniao e o aviso sai no log."""
+    import gspread
+    try:
+        linhas = sh.worksheet(aba).get_all_values()
+    except gspread.exceptions.WorksheetNotFound:
+        print(f"[AVISO] {aba} ausente: reunioes do Incentivador saem como 0 na aba Brenda")
+        return frozenset()
+    if not linhas:
+        return frozenset()
+    cab = linhas[0]
+    i, j = cab.index("lead_id_hash"), cab.index("reuniao_ou_alem")
+    return frozenset(l[i] for l in linhas[1:] if len(l) > j and l[j] == "sim")
+
+
 def publicar_base(sh, svc, spreadsheet_id, linhas):
     BASE.publicar(sh, svc, spreadsheet_id, linhas)
 
@@ -241,13 +270,16 @@ def main():
         fila = sdr.fila_do_dia(conn)
     finally:
         conn.close()
-    linhas = base(envios)
     sh = sync.get_sheets_client().open_by_key(sync.SPREADSHEET_ID)
+    reunioes = leads_com_reuniao(sh)
+    envios = [dict(e, reuniao=e.get("lead_hash") in reunioes) for e in envios]
+    linhas = base(envios)
     svc = sync.build_sheets_service()
     renomear_abas_antigas(sh, svc, sync.SPREADSHEET_ID)
     publicar_base(sh, svc, sync.SPREADSHEET_ID, linhas)
     foto = componentes_visao_geral(envios, fila, agora.date())
     saude = tabela_saude(envios, agora.date(), fila=fila)
+    dp.gravar_resumo(sh, svc, sync.SPREADSHEET_ID, resumo_saude(envios, agora.date()), agora)
     montar_painel(linhas, agora, foto, saude).publicar(sh, svc, sync.SPREADSHEET_ID, indice=1)
     print(f"Brenda: aba publicada ({len(linhas)} linhas na base).")
 

@@ -340,13 +340,19 @@ class Tabela(_Componente):
 
     em_celulas = True
 
-    def __init__(self, titulo, cabecalho, linhas, formatos=None, gradiente=()):
+    def __init__(self, titulo, cabecalho, linhas, formatos=None, gradiente=(), spans=None):
+        """spans: colunas da grade por coluna da tabela (soma = N_COLS); sem ele, a 1a coluna fica larga."""
         self.titulo, self.cabecalho, self.linhas = titulo, cabecalho, linhas
         self.formatos = formatos or [None] * len(cabecalho)
         self.gradiente = gradiente
+        if spans is not None and (len(spans) != len(cabecalho) or sum(spans) != N_COLS):
+            raise ValueError(f"spans {spans} nao fecha {len(cabecalho)} colunas em {N_COLS}")
+        self.spans = spans
         self.altura = (2 + max(len(linhas), 1)) * ALTURA_LINHA
 
     def _spans(self):
+        if self.spans:
+            return list(self.spans)
         k = len(self.cabecalho)
         resto = 2 if k <= 6 else 1
         primeiro = N_COLS - resto * (k - 1)
