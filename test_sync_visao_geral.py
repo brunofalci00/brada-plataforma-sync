@@ -58,16 +58,16 @@ def test_etapas_escritas_com_percentual_sobre_a_anterior_e_periodo():
     assert plat[4] == "" and round(plat[6], 4) == round(57 / 156, 4)
 
 
-def test_precisa_de_acao_tem_dono_e_agir_vem_primeiro():
+def test_precisa_de_acao_agir_vem_primeiro():
     painel, _ = vg.montar_painel(_resumo(), AGORA)
     linhas = _componente(painel, "Precisa de acao").linhas
     alerta = {l[0]: l for l in linhas}
-    assert alerta["Brenda disparando para Incentivador"][-1] == "AGIR"
-    assert alerta["Brenda disparando para Elaboracao"][-1] == "ok"
-    assert alerta["Brenda disparando para Incentivador"][3] == "Jean (Automatize)"
-    assert alerta["Primeira Fila: cliques nos espacos que viram conversa (30 dias)"][-1] == "AGIR"
+    assert alerta["Brenda: disparos para Incentivador"][-1] == "AGIR"
+    assert alerta["Brenda: disparos para Elaboracao"][-1] == "ok"
+    assert any(k.startswith("Primeira Fila: quem clica") and l[-1] == "AGIR" for k, l in alerta.items())
+    assert all(len(l) == 4 for l in linhas)  # sem coluna de dono por enquanto
     situacoes = [l[-1] for l in linhas]
-    assert situacoes == sorted(situacoes, key=lambda s: s != "AGIR") and all(l[3] for l in linhas)
+    assert situacoes == sorted(situacoes, key=lambda s: s != "AGIR")
 
 
 def test_chave_ausente_vira_zero_e_e_reportada():
