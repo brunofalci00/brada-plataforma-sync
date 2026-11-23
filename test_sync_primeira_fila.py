@@ -44,7 +44,7 @@ def test_funis_vivos_e_bases_no_retorno():
     painel, resumo, bases = pf.montar_painel(dados, AGORA)
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
     assert "Anfitriao: Hunter da captacao ao cadastro (periodo A)" in titulos
-    assert "Produtor: da abordagem ao cadastro (periodo A)" in titulos
+    assert "Produtor SALIC (SDR): da abordagem ao cadastro (periodo A)" in titulos
     assert [b.aba for b, _ in bases] == ["base_pf_hunter", "base_pf_demanda", "base_pf_jornada", "base_pf_produtor"]
     assert resumo["pf_produtor_abordados"] == 0
     assert resumo["pf_cliques_total"] == 702
@@ -84,4 +84,4 @@ def test_linhas_jornada_junta_ga4_e_banco_no_mesmo_dia():
     assert sem[cab.index("Sessoes em pagina de espaco")] == 3
     assert sem[cab.index("Sessoes no criar conta")] == 1
     assert sem[cab.index("Perfis de anfitriao")] == 1
-    assert sp[cab.index("Espacos cadastrados")] == 1 and sp[cab.index("Cliques em anuncios")] == 1
+    assert sp[cab.index("Espacos cadastrados")] == 1 and sp[cab.index("Cliques nos espacos")] == 1

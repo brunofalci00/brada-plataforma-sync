@@ -140,10 +140,6 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore da plataforma + banco do SDR Brada · "
                   "mude as células claras abaixo")
     p.linha(ctl)
-    if envios_sdr is not None:
-        import explorar_disparos as ex
-        import sdr_automatize as sdra
-        p.linha(ex.tabela_saude(envios_sdr, hoje, [(sdra.APTOS, "Plataforma")]))
     p.linha(fl.CartaoVivo("Brenda: leads disparados", fsdr.soma_p("disparados", "A"), fsdr.soma_p("disparados", "B")),
             fl.CartaoVivo("Brenda: cadastros", fsdr.soma_p("cadastro", "A"), fsdr.soma_p("cadastro", "B")),
             fl.CartaoVivo("Contas novas (todas as origens)", fcontas.soma_p("contas", "A"),
@@ -151,9 +147,9 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
             fl.CartaoVivo("Conta ate projeto apto", fcontas.taxa("aptos", "A"), fcontas.taxa("aptos", "B"),
                           dp.FMT_PCT))
     p.linha(fl.FunilVivo("Brenda: do disparo ao projeto apto", fsdr, FUNIL_SDR, altura=360,
-                         subtitulo="Leads na data do 1o disparo · filtros de canal e fonte"),
+                         subtitulo="So quem a Brenda abordou (e-mail ou WhatsApp) · lead na data do 1o disparo"),
             fl.FunilVivo("Todas as origens: da conta ao projeto apto", fcontas, FUNIL_CONTAS, altura=360,
-                         subtitulo="Sem migrados · contas na data do cadastro · filtro de origem"))
+                         subtitulo="Toda conta nova, venha de onde vier (inclui as da Brenda) · sem migrados"))
     p.linha(fl.evolucao("Brenda: leads disparados no periodo A", fsdr, "disparados", "canal", canais,
                         subtitulo="Por dia ou semana, empilhado por canal"),
             fl.evolucao("Contas novas no periodo A", fcontas, "contas", "origem", origens,

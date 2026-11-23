@@ -82,3 +82,5 @@ def test_painel_com_executivos_mostra_tabela_de_cobranca():
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
     assert any(t.startswith("Cobranca por executivo") for t in titulos)
     assert "Sem executivo dono" in titulos
+    assert "Cards que chegaram a reuniao" in titulos and "Card ate reuniao" not in titulos
+    assert not any(t.startswith("A Brenda esta disparando") for t in titulos)  # alerta mora na Brenda e na Visao Geral

@@ -10,6 +10,7 @@ marcas de etapa.
 """
 
 import datetime
+import hashlib
 import os
 
 SECRETS_FILE = os.path.expanduser("~/.brada-secrets/automatize-sdr-brada.env")
@@ -120,7 +121,7 @@ CONSULTA_FRENTES = """
            aberto_em is not null, clicou_em is not null, respondeu_em is not null,
            (visitou_agenda_em is not null or clicou_agendar_em is not null),
            coalesce(card_hubspot_em::date >= dia, false), coalesce(cadastro_em::date >= dia, false),
-           bounce_em is not null
+           bounce_em is not null, lead_id
     from dados.envios
     where modalidade in (%s, %s, %s) and dia is not null
       and coalesce(origem_evento, '') not like 'backfill%%'
@@ -137,10 +138,16 @@ CONSULTA_FILA = """
 
 
 def envios_frentes(conn):
-    """Envios das tres frentes, sem lead_id: modalidade, dia, canal, fonte e marcas de etapa."""
+    """Envios das tres frentes, sem lead_id: modalidade, dia, canal, fonte, marcas de etapa e `lead_hash`
+    (o mesmo pseudonimo de sync.hash_id, para cruzar com a reuniao do Incentivador). O id cru nao sai daqui."""
     cur = conn.cursor()
     cur.execute(CONSULTA_FRENTES, (INCENTIVADOR, ELABORACAO, APTOS))
-    return [dict(zip(CAMPOS_FRENTES, r)) for r in cur.fetchall()]
+    return [dict(zip(CAMPOS_FRENTES, r[:-1]), lead_hash=hash_lead(r[-1])) for r in cur.fetchall()]
+
+
+def hash_lead(lead_id):
+    """Igual a sync.hash_id (sha256 truncado em 12); repetido aqui para o modulo nao depender do sync."""
+    return hashlib.sha256(str(lead_id).encode("utf-8")).hexdigest()[:12] if lead_id else ""
 
 
 def fila_do_dia(conn):

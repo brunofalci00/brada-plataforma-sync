@@ -91,7 +91,7 @@ def blocos(painel, ctl, dados):
                  dp.Cartao("Ja abordados (hoje)", fila["abordados"]),
                  dp.Cartao("Ainda nao abordados (hoje)", fila["total"] - fila["abordados"]),
                  dp.Cartao("Com telefone (hoje)", fila["com_telefone"]))
-    painel.linha(fl.FunilVivo("Produtor: da abordagem ao cadastro (periodo A)", fp, FUNIL, altura=320,
+    painel.linha(fl.FunilVivo("Produtor SALIC (SDR): da abordagem ao cadastro (periodo A)", fp, FUNIL, altura=320,
                               subtitulo="Produtor na data do primeiro contato · etapas = estado de hoje · "
                                         "filtros de cidade, categoria e canal do Hunter nao valem aqui"))
     painel.linha(fl.por_dimensao("Produtor por canal (periodo A)", fp, "canal_produtor",
@@ -99,7 +99,6 @@ def blocos(painel, ctl, dados):
                      ("Abordados", "soma", "abordados"), ("Clicaram", "taxa", "clicaram"),
                      ("Cadastraram", "soma", "cadastraram"), ("Descadastraram", "taxa", "descadastraram")],
                      cabecalho_dim="Canal"))
-    painel.linha(fl.comparacao_ab("Produtor: periodo A contra periodo B", fp, FUNIL))
     painel.linha(fl.por_dimensao("Produtor por lei (periodo A)", fp, "lei", BASE.opcoes(pl, "lei") or ["sem lei"], [
         ("Abordados", "soma", "abordados"), ("Clicaram", "taxa", "clicaram"), ("Cadastraram", "soma", "cadastraram"),
         ("Descadastraram", "taxa", "descadastraram")], gradiente=[1], cabecalho_dim="Lei"))
