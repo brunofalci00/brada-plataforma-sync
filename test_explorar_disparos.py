@@ -21,6 +21,9 @@ def test_etapa_conta_quem_chegou_nela_ou_alem():
     # o card nasce sozinho ao abrir a agenda: resultado do Incentivador e reuniao (HubSpot)
     reuniao = dict(_e(sdr.INCENTIVADOR, D(2026, 11, 3), card=True), reuniao=True)
     assert ex.etapas_do_envio(reuniao)["resultado"] == 1
+    # elaboracao termina na assinatura do AprovAI, nao no cadastro
+    assert ex.etapas_do_envio(_e(sdr.ELABORACAO, D(2026, 11, 3), cadastro=True))["resultado"] == 0
+    assert ex.etapas_do_envio(dict(_e(sdr.ELABORACAO, D(2026, 11, 3)), assinou=True))["resultado"] == 1
     # cadastro nao e resultado do Incentivador
     assert ex.etapas_do_envio(_e(sdr.INCENTIVADOR, D(2026, 11, 3), cadastro=True))["resultado"] == 0
     assert ex.etapas_do_envio(_e(sdr.APTOS, D(2026, 11, 3), cadastro=True))["resultado"] == 1

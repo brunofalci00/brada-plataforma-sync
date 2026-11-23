@@ -112,9 +112,20 @@ def test_funil_de_elaboracao_e_cumulativo():
     from sync_aprovai import completar_elaboracao, funil_elaboracao
     leads = completar_elaboracao(sdra.por_lead([
         _envio_elab("a"), _envio_elab("b", abriu=True), _envio_elab("c", respondeu=True),
-        _envio_elab("d", cadastro=True)]))
+        _envio_elab("d", cadastro=True)]), frozenset({"d"}))
     assert funil_elaboracao(leads) == [("Disparados", 4), ("Abriram", 3), ("Clicaram ou responderam", 2),
-                                       ("Cadastro na plataforma Brada", 1)]
+                                       ("Assinaram o AprovAI", 1)]
+
+
+def test_lead_da_brenda_assina_pelo_utm_term_da_assinatura_ativa():
+    from sync_aprovai import leads_que_assinaram, assinantes_por_origem
+    docs = [{"subscriptionStatus": "active", "utm_term": "lead-1", "utm_source": "email"},
+            {"subscriptionStatus": "active", "attribution": {"utm_term": "lead-2", "utm_source": "whatsapp"}},
+            {"subscriptionStatus": "active", "migratedFromKiwify": True, "utm_term": "lead-3"},
+            {"subscriptionStatus": "canceled", "utm_term": "lead-4"},
+            {"subscriptionStatus": "active"}]
+    assert leads_que_assinaram(docs) == frozenset({"lead-1", "lead-2"})
+    assert dict(assinantes_por_origem(docs)) == {"email": 1, "whatsapp": 1, "sem origem": 1}
 
 
 def test_cobrancas_por_situacao_ignora_teste_e_agrupa_status():

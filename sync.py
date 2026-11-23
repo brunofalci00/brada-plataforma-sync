@@ -936,6 +936,8 @@ def build_snapshot(users_rows, projects_rows, proposals_rows, today_str, mig=Non
     for role, n in sorted(Counter(r[u["role"]] or "(vazio)" for r in users_rows).items()):
         add("users_total", role, n)
     add("users_ativos_30d", "(todos)", sum(1 for r in users_rows if r[u["ativo_30d"]] == "sim"))
+    add("ongs_ativas_30d", "(todos)", sum(1 for r in users_rows
+                                         if r[u["ativo_30d"]] == "sim" and r[u["role"]] == "ONG"))
     add("users_novos_nao_migrados", "(todos)",
         sum(1 for r in users_rows if r[u["is_migrado"]] == "nao"))
 
@@ -1225,6 +1227,8 @@ def compute_dashboard_metrics(users_rows, projects_rows, proposals_rows, now_brt
         "ativacao_frac": (round(sum(1 for r in novos if r[u["logou_alguma_vez"]] == "sim")
                                 / len(novos), 4) if novos else 0),
         "ativos_30d": sum(1 for r in users_rows if r[u["ativo_30d"]] == "sim"),
+        # Decisao de 23/11: o publico da plataforma e o proponente; o cartao conta so ONGs.
+        "ongs_ativas_30d": sum(1 for r in ongs if r[u["ativo_30d"]] == "sim"),
         "canais": canais,
         "semanas": semanas,
         "utm_automatize": sum(1 for r in novos if r[u["origem_canal"]] == "automatize"),

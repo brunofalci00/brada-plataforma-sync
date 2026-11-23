@@ -79,8 +79,9 @@ CONSULTAS = {
         select (select count(*) from cliques_reais),
                (select count(*) from cliques_reais where clicked_at >= now() - interval '30 days'),
                (select count(*) from conversas_reais),
-               (select count(*) from reservas_reais)""",
-        ["cliques_total", "cliques_30d", "conversas", "pedidos_reserva"]),
+               (select count(*) from reservas_reais),
+               (select count(*) from conversas_reais where criada_em >= now() - interval '30 days')""",
+        ["cliques_total", "cliques_30d", "conversas", "pedidos_reserva", "conversas_30d"]),
     "reservas": ("""
         select count(*) filter (where pagamento_status = 'pago' and status <> 'cancelada'),
                coalesce(sum(valor_total) filter (where pagamento_status = 'pago' and status <> 'cancelada'), 0),
@@ -354,7 +355,8 @@ def montar_painel(dados, agora, web=None):
                  dp.Rosca("Anfitrioes por plano (foto de hoje)", [
                      ("Rede", a["plano_rede"]), ("Basico", a["plano_basico"]),
                      ("Sem plano", a["perfis"] - a["plano_rede"] - a["plano_basico"])]))
-    resumo = {"pf_espacos_no_ar": e["no_ar"], "pf_cliques_30d": p["cliques_30d"], "pf_cliques_total": p["cliques_total"],
+    resumo = {"pf_espacos_no_ar": e["no_ar"], "pf_cliques_30d": p["cliques_30d"],
+              "pf_conversas_30d": p.get("conversas_30d", 0), "pf_cliques_total": p["cliques_total"],
               "pf_pedidos": p["pedidos_reserva"], "pf_reservas_pagas": r["pagas"], "pf_valor_pago": r["valor_pago"],
               "pf_comissao_mes": r["comissao_mes"],
               "pf_anfitrioes": a["perfis"],

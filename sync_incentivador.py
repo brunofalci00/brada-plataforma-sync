@@ -148,7 +148,7 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
                 dp.Cartao("Cards que chegaram a reuniao", sum(r[5] for r in executivos)))
         p.linha(dp.Tabela("Cobranca por executivo: cards da Brenda (foto de hoje, sem filtro)", CAB_EXECUTIVOS,
                           executivos, formatos=[None] + [dp.FMT_INT] * 7 + [dp.FMT_PCT], gradiente=[3]))
-    p.linha(fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO))
+    p.linha(fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO, maturacao=fl.MATURACAO_DIAS))
     p.linha(fl.evolucao("Leads disparados no periodo A", flt, "disparados", "canal", canais,
                         subtitulo="Por dia ou semana (filtro 'Agrupar por'), empilhado por canal"))
     recentes = agora.date() - datetime.timedelta(days=2 * fl.JANELA_PADRAO - 1)
@@ -165,7 +165,9 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
               "incentivador_cards": etapas[2][1],
               "incentivador_reuniao": etapas[-1][1], "incentivador_pipeline_reuniao": len(hs["rows"]),
               # mesmo numero do cartao "Cards que chegaram a reuniao" (por card, inclui lead fora da base de envios)
-              "incentivador_cards_reuniao": sum(r[5] for r in executivos) if executivos else etapas[-1][1]}
+              "incentivador_cards_reuniao": sum(r[5] for r in executivos) if executivos else etapas[-1][1],
+              "incentivador_cards_parados": sum(r[3] for r in executivos) if executivos else 0,
+              "incentivador_cards_sem_dono": next((r[1] for r in executivos if r[0] == SEM_DONO), 0) if executivos else 0}
     return p, resumo, linhas
 
 

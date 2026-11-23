@@ -302,12 +302,25 @@ def evolucao(titulo, flt, etapa, dimensao, valores, subtitulo=None):
                      subtitulo=subtitulo or "Por dia ou semana (filtro 'Agrupar por')")
 
 
-def comparacao_ab(titulo, flt, etapas):
-    """Tabela etapa x (A, % do topo A, B, % do topo B, A sobre B)."""
-    topo_a, topo_b = flt.soma_p(etapas[0][1], "A"), flt.soma_p(etapas[0][1], "B")
+MATURACAO_DIAS = 14  # decisao de 23/11: conversao so conta lead abordado ha pelo menos 14 dias
+
+
+def comparacao_ab(titulo, flt, etapas, maturacao=None):
+    """Tabela etapa x (A, % do topo A, B, % do topo B, A sobre B).
+
+    maturacao (dias): cada periodo termina em MIN(ate; hoje - maturacao). Sem isso o periodo A sempre
+    parece pior, porque o lead de ontem ainda nao teve tempo de converter. So para funil por lead."""
+    def soma(etapa, p):
+        if not maturacao:
+            return flt.soma_p(etapa, p)
+        de, ate = flt.periodo(p)
+        return flt.soma(etapa, de, f"MIN({ate};TODAY()-{maturacao})")
+    if maturacao:
+        titulo = f"{titulo}, so leads abordados ha {maturacao}+ dias"
+    topo_a, topo_b = soma(etapas[0][1], "A"), soma(etapas[0][1], "B")
     linhas = []
     for nome, etapa in etapas:
-        a, b = flt.soma_p(etapa, "A"), flt.soma_p(etapa, "B")
+        a, b = soma(etapa, "A"), soma(etapa, "B")
         linhas.append([nome, F(a), F(f"IFERROR({a}/{topo_a};0)"), F(b), F(f"IFERROR({b}/{topo_b};0)"),
                        F(f'IF({b}<{MIN_BASE_COMPARACAO};"";IFERROR({a}/{b}-1;""))')])
     return dp.Tabela(f"{titulo} (A sobre B fica vazio quando B tem menos de {MIN_BASE_COMPARACAO})",

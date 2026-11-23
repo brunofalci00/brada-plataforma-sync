@@ -169,8 +169,7 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
     ga = m.get("ga")
     p.linha(dp.Cartao("Projetos aptos a captar (hoje)", m["proj_ativos"],
                       base=_valor_em(tendencia_rows, 1, ha_30), descricao_base="vs 30 dias atras"),
-            dp.Cartao("Acessaram em 30 dias", m["ativos_30d"],
-                      base=_valor_em(tendencia_rows, 2, ha_30), descricao_base="vs 30 dias atras"),
+            dp.Cartao("ONGs que acessaram em 30 dias", m.get("ongs_ativas_30d", m["ativos_30d"])),
             dp.Cartao("Prazo vencido, a reativar", m["proj_a_reativar"]),
             dp.Cartao("Visitantes no site (30 dias)", ga["ativos"] if ga else 0))
     p.linha(dp.Rosca("Estoque de projetos (foto de hoje)", [
@@ -197,7 +196,8 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                           gradiente=[1]))
 
     resumo = {"plataforma_aptos": m["proj_ativos"], "plataforma_cadastros_mes": m["novos_mes"],
-              "plataforma_ativos_30d": m["ativos_30d"], "plataforma_a_reativar": m["proj_a_reativar"],
+              "plataforma_ativos_30d": m.get("ongs_ativas_30d", m["ativos_30d"]),
+              "plataforma_rascunhos_perto": m.get("rasc_perto", 0), "plataforma_a_reativar": m["proj_a_reativar"],
               "plataforma_novos_aptos": m["funil_aptos"], "plataforma_novos_cadastros": m["funil_cadastraram"]}
     if leads_sdr is not None:
         etapas = dict(funil_aptos(leads_sdr))
