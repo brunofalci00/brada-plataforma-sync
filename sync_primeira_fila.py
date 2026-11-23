@@ -150,8 +150,9 @@ BASE_HUNTER = fl.Base("base_pf_hunter", [("cidade", "Cidade", fl.TODAS), ("categ
                                          ("canal", "Canal", fl.TODOS)], [
     ("captados", "Captados"), ("abordados", "Abordados"), ("responderam", "Responderam"),
     ("link", "Link enviado"), ("clicou", "Clicaram no link"), ("cadastrou", "Cadastraram")])
-FUNIL_HUNTER = [("Espacos captados", "captados"), ("Abordados", "abordados"), ("Responderam", "responderam"),
-                ("Link enviado", "link"), ("Clicaram no link", "clicou"), ("Cadastraram", "cadastrou")]
+# Resposta fica fora do funil: e paralela ao link (a abertura ja leva o link), nao uma etapa antes dele.
+FUNIL_HUNTER = [("Espacos captados", "captados"), ("Abordados", "abordados"), ("Link enviado", "link"),
+                ("Clicaram no link", "clicou"), ("Cadastraram", "cadastrou")]
 BASE_DEMANDA = fl.Base("base_pf_demanda", [("cidade", "Cidade", fl.TODAS)], [
     ("cliques", "Cliques nos espacos"), ("conversas", "Conversas"), ("pedidos", "Pedidos de reserva"),
     ("pagas", "Reservas pagas")])
@@ -176,16 +177,16 @@ CANAIS = {"whatsapp": "WhatsApp", "email": "E-mail", "e-mail": "E-mail", "instag
 
 def _canal(c):
     if not c:
-        return "Sem envio"
+        return "Nao abordado"
     return CANAIS.get(str(c).strip().lower(), str(c).strip().capitalize())
 
 
 def _etapas(abordado, respondeu, link, clicou, cadastrou):
-    """Cumulativas de tras para frente: quem cadastrou tambem clicou, recebeu link, respondeu e foi abordado."""
+    """Cumulativas de tras para frente: quem cadastrou tambem clicou, recebeu link e foi abordado.
+    Resposta so conta quando registrada: o link sai sem resposta (abertura com link), entao nao a prova."""
     clicou = clicou or cadastrou
     link = link or clicou
-    respondeu = respondeu or link
-    abordado = abordado or respondeu
+    abordado = abordado or respondeu or link
     return {"captados": 1, "abordados": abordado, "responderam": respondeu, "link": link,
             "clicou": clicou, "cadastrou": cadastrou}
 
@@ -308,7 +309,7 @@ def montar_painel(dados, agora, web=None):
     hl = linhas_hunter(dados.get("hunter_linhas", []))
     dl = linhas_demanda(dados.get("demanda_linhas", []))
     cidades = list(dict.fromkeys(BASE_HUNTER.opcoes(hl, "cidade") + BASE_DEMANDA.opcoes(dl, "cidade"))) or ["sem cidade"]
-    canais = BASE_HUNTER.opcoes(hl, "canal") or ["Sem envio"]
+    canais = BASE_HUNTER.opcoes(hl, "canal") or ["Nao abordado"]
     ctl = fl.controles(ABA, hoje, [fl.campo_lista("cidade", "Cidade", cidades, span=2),
                                    fl.campo_lista("categoria", "Categoria (Hunter)",
                                                   BASE_HUNTER.opcoes(hl, "categoria"), span=2),

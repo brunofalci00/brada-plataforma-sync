@@ -101,7 +101,7 @@ def por_executivo(cards, nomes, hoje):
         abertos = [c for c in cs if c["estagio"] not in hub.BEYOND_REUNIAO and c["estagio"] != "closedlost"]
         dias = sorted((hoje - _data(c["entrou_estagio"])).days for c in abertos if c["entrou_estagio"])
         mediana = dias[len(dias) // 2] if dias else ""
-        linhas.append([dono, len(cs), len(abertos), sum(d > DIAS_PARADO for d in dias), mediana, reuniao,
+        linhas.append([dono, len(cs), len(abertos), sum(d >= DIAS_PARADO for d in dias), mediana, reuniao,
                        sum(c["estagio"] in hub.GANHO_OU_ALEM for c in cs), perdido, reuniao / len(cs)])
     return sorted(linhas, key=lambda r: (-r[1], r[0]))
 

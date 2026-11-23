@@ -100,8 +100,8 @@ def test_painel_comeca_pelos_controles():
 def test_painel_sem_ga_tem_jornada_que_nunca_sobe():
     m = sc.calcular(_dados(), AGORA)
     painel, resumo = sc.montar_painel(m, sc.diario(_dados()), AGORA_DT)
-    etapas = [v for _, v in _componente(painel, "Jornada do membro (foto de hoje, sem filtro)").etapas]
-    assert etapas == sorted(etapas, reverse=True)
+    barras = _componente(painel, "O que os membros ja fizeram (foto de hoje, pessoas)").linhas
+    assert barras[0] == ["Cadastraram", 2] and not any("acao" in b[0] for b in barras)
     assert resumo["comunidade_membros"] == 2 and "comunidade_visitantes_30d" not in resumo
 
 
