@@ -188,15 +188,17 @@ def test_funil_do_app_ignora_lead_de_teste():
     assert [(r[0], r[1], r[3]) for r in rows] == [("2026-10-26", 1, 0), ("2026-10-27", 0, 1)]
 
 
-def test_cartoes_separam_brenda_do_site():
+def test_aba_abre_pelo_asaas_e_nao_mostra_a_brenda():
     import datetime
     from sync_aprovai import montar_painel
-    resumo = {"assinantes_reais_ativos": 0, "mrr_real": 0}
+    resumo = {"assinantes_reais_ativos": 1, "mrr_real": 89.0}
     pre = {"total_ativos_no_app": 22, "migrados_kiwify_sem_billing_asaas": 17, "com_billing_asaas_real": 5}
-    painel, _, _ = montar_painel([["2026-11-11", 7, 1, 0, "f"]], resumo, pre, [], None, None,
-                                 datetime.datetime(2026, 11, 12, 9))
+    painel, kpis, _ = montar_painel([["2026-11-11", 7, 1, 0, "f"]], resumo, pre, [], None, None,
+                                    datetime.datetime(2026, 11, 12, 9))
     cartoes = [c.titulo for c in painel.linhas[1]]
-    assert cartoes == ["Brenda: leads disparados", "Brenda: cadastros", "Site: visitas", "Site: leads"]
+    assert cartoes[:2] == ["Assinantes pagando (Asaas, hoje)", "Receita recorrente (MRR, Asaas, hoje)"]
+    assert painel.linhas[1][1].valor == 89.0
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
-    assert "Quem e assinante de verdade (foto de hoje, sem filtro)" in titulos
-    assert "Anuncios (aguardando dado)" in titulos
+    assert titulos.index("Quem e assinante de verdade (foto de hoje, sem filtro)") < titulos.index("Site do AprovAI (periodo A)")
+    assert not [t for t in titulos if "Brenda" in t]
+    assert kpis["aprovai_mrr"] == 89.0

@@ -613,6 +613,9 @@ class Painel:
                                                            "gridProperties": {"rowCount": n_linhas_dados,
                                                                               "columnCount": n_colunas_dados}},
                                             "fields": "hidden,gridProperties(rowCount,columnCount)"}}]
+        # Zera o formato da aba de dados inteira: o clear de valores nao tira o numberFormat, e um grafico
+        # que passa a ler uma celula antes ocupada por outro bloco herdaria o formato velho (ex.: %).
+        reqs.append({"repeatCell": {"range": {"sheetId": dados_id}, "cell": {}, "fields": "userEnteredFormat"}})
         for r, c, fmt in formatos:
             reqs.append({"repeatCell": {"range": {"sheetId": dados_id, "startRowIndex": r, "endRowIndex": r + 1,
                                                   "startColumnIndex": c, "endColumnIndex": c + 1},

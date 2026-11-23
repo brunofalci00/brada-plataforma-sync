@@ -148,3 +148,14 @@ def test_gradiente_vale_para_coluna_de_formula():
     t = dp.Tabela("T", ["S", "Taxa"], [["a", dp.Formula("=1")], ["b", dp.Formula("=2")]],
                   formatos=[None, dp.FMT_PCT], gradiente=[1])
     assert sum("addConditionalFormatRule" in r for r in _reqs(dp.Painel("X", "t", "r").linha(t))) == 1
+
+
+def test_formato_velho_da_aba_de_dados_e_zerado_antes_dos_novos():
+    # 23/11: o funil do AprovAI herdou "%" de uma tabela que ocupava a mesma celula antes da troca de layout.
+    p = dp.Painel("X", "t", "r").linha(dp.Funil("F", [("a", 10), ("b", 2)])).linha(dp.Cartao("c", 1, dp.FMT_PCT))
+    reqs = _reqs(p)
+    zera = [i for i, r in enumerate(reqs) if "repeatCell" in r and r["repeatCell"]["range"]["sheetId"] == 2
+            and r["repeatCell"]["fields"] == "userEnteredFormat" and "startRowIndex" not in r["repeatCell"]["range"]]
+    novos = [i for i, r in enumerate(reqs) if "repeatCell" in r and r["repeatCell"]["range"]["sheetId"] == 2
+             and r["repeatCell"]["fields"] == "userEnteredFormat.numberFormat"]
+    assert zera and novos and zera[0] < min(novos)
