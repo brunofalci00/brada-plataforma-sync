@@ -66,16 +66,9 @@ _load_local_env(os.path.expanduser(r"~/.brada-secrets/plataforma-sync.env"))
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "")
 
-# Endpoint de leads da Automatize (export-leads-automatize). Token via env
-# AUTOMATIZE_ENDPOINT_TOKEN (secret no CI; ~/.brada-secrets/plataforma-sync.env local).
-# Cap confirmado de 1000/resposta SEM paginacao. A deduplicacao preserva recebidos,
-# mas NAO prova completude; o servidor pode ignorar a janela (revalidado 30/08).
-AUTOMATIZE_ENDPOINT_URL = os.environ.get(
-    "AUTOMATIZE_ENDPOINT_URL",
-    "https://n8n-webhook.painel.automatizenow.io/webhook/export-leads-automatize",
-)
-AUTOMATIZE_ENDPOINT_TOKEN = os.environ.get("AUTOMATIZE_ENDPOINT_TOKEN", "")
-LEADS_LOOKBACK_DAYS = 45  # janela do incremental ?atualizados_desde
+# Endpoint de leads da Automatize (export-leads-automatize): DESLIGADO pela Automatize em 19/11.
+# raw_leads_automatize fica com o que ja foi recebido; o join com a plataforma segue recalculado.
+# Os disparos vem do banco do SDR (sdr_automatize.py).
 
 # Service account Google Sheets (mesma do hubspot-sync / clickup-sync)
 SHEETS_SA_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
@@ -833,53 +826,10 @@ def build_migracao(antiga_rows, projects_raw, users_by_id, login_index, today_st
 
 
 def load_automatize_leads(now_brt, issues):
-    """Puxa leads do endpoint da Automatize (incremental por janela; cap de
-    1000/resposta sem paginacao). Retorna lista de dicts ou None. None (falha,
-    sem token, formato) preserva os atributos recebidos; o join com a plataforma
-    continua sendo recalculado sobre o historico, mesmo quando a fonte falha.
-    NUNCA loga token / URL-com-token / body."""
-    if not AUTOMATIZE_ENDPOINT_TOKEN:
-        issues["endpoint_automatize"]["sem_token"] = 1
-        print("  leads_automatize: sem AUTOMATIZE_ENDPOINT_TOKEN -> recebidos preservados; join recalculado")
-        return None
-    import requests
-
-    since = (now_brt - datetime.timedelta(days=LEADS_LOOKBACK_DAYS)).astimezone(
-        datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    try:
-        r = requests.get(
-            AUTOMATIZE_ENDPOINT_URL,
-            headers={"Authorization": f"Bearer {AUTOMATIZE_ENDPOINT_TOKEN}"},
-            params={"atualizados_desde": since},
-            timeout=90,
-        )
-    except Exception as e:  # noqa: BLE001 (falha de rede nao pode quebrar o sync)
-        issues["endpoint_automatize"][f"conexao_{type(e).__name__}"] = 1
-        print(f"  leads_automatize: erro de conexao ({type(e).__name__}) -> recebidos preservados; join recalculado")
-        return None
-    if r.status_code != 200:
-        issues["endpoint_automatize"][f"http_{r.status_code}"] = 1
-        print(f"  leads_automatize: HTTP {r.status_code} -> recebidos preservados; join recalculado (body/token nao logados)")
-        return None
-    try:
-        data = r.json()
-    except ValueError:
-        issues["endpoint_automatize"]["json_invalido"] = 1
-        print("  leads_automatize: resposta nao-JSON -> recebidos preservados; join recalculado")
-        return None
-    if isinstance(data, dict):
-        for k in ("data", "leads", "results", "items"):
-            if isinstance(data.get(k), list):
-                data = data[k]
-                break
-    if not isinstance(data, list):
-        issues["endpoint_automatize"]["formato_inesperado"] = 1
-        print("  leads_automatize: payload nao e array -> recebidos preservados; join recalculado")
-        return None
-    if len(data) >= 1000:
-        issues["endpoint_automatize"]["possivel_truncamento_1000"] = len(data)
-    print(f"  leads_automatize: {len(data)} leads (desde {since}Z)")
-    return data
+    """O endpoint export-leads-automatize foi desligado pela Automatize em 19/11. Devolve None: os
+    atributos ja recebidos ficam preservados e o join com a plataforma continua recalculado."""
+    print("  leads_automatize: endpoint desligado (19/11) -> recebidos preservados; join recalculado")
+    return None
 
 
 def build_leads_automatize(leads_raw, users_rows, issues):

@@ -240,8 +240,8 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
     p.linha(ctl)
     p.linha(fl.CartaoVivo("Cadastros", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
             fl.CartaoVivo("Perfis completos", flt.soma_p("perfis", "A"), flt.soma_p("perfis", "B")),
-            fl.CartaoVivo("Primeiras acoes", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
-            fl.CartaoVivo("Primeiras acoes por cadastro", flt.taxa("acoes", "A"), flt.taxa("acoes", "B"),
+            fl.CartaoVivo("Primeiras acoes (eventos, nao pessoas)", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
+            fl.CartaoVivo("Perfis completos por cadastro", flt.taxa("perfis", "A"), flt.taxa("perfis", "B"),
                           dp.FMT_PCT))
     p.linha(fl.comparacao_ab("Periodo A contra periodo B (cada evento na data em que aconteceu)", flt, ETAPAS_COM))
     p.linha(fl.evolucao("Cadastros no periodo A", flt, "cadastros", "perfil", perfis,
@@ -256,10 +256,10 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
     p.linha(dp.Cartao("Membros (hoje)", m["membros"]),
             dp.Cartao("Membros que acessaram em 30 dias", m["login_30d"]),
             dp.Cartao("Visitantes que voltaram", ga["taxa_retorno"] if ga else 0, dp.FMT_PCT))
-    p.linha(dp.Funil("Jornada do membro (foto de hoje, sem filtro)", [
-                ("Cadastraram", m["membros"]), ("Concluiram o onboarding", round(m["onboarding"] * m["membros"])),
-                ("Fizeram uma primeira acao", m["primeira_acao"])],
-                subtitulo="% sobre os membros", altura=320),
+    p.linha(dp.Serie("O que os membros ja fizeram (foto de hoje, pessoas)", ["Etapa", "Membros"], [
+                ["Cadastraram", m["membros"]], ["Concluiram o onboarding", round(m["onboarding"] * m["membros"])],
+                ["Fizeram o quiz de impacto", m["quiz"]], ["Acessaram em 30 dias", m["login_30d"]]],
+                tipo="BAR", subtitulo="Cada barra conta pessoas · primeiras acoes sao eventos e ficam fora", altura=320),
             dp.Rosca("Perfis dos membros (foto de hoje)", [
                 ("Explorador", m["explorador"]), ("Idealizador", m["idealizador"]),
                 ("Incentivador", m["incentivador"]), ("Viabilizador", m["viabilizador"])], altura=320))

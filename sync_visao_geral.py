@@ -34,7 +34,7 @@ PRODUTOS = [
     ("Proponente elaboracao", "AprovAI (site e app)", "desde 26/10",
      [("visitas", "aprovai_visitas"), ("leads", "aprovai_leads"), ("pagando hoje", "aprovai_assinantes", False)]),
     ("Outros", "Comunidade", "total",
-     [("membros", "comunidade_membros"), ("fizeram 1a acao", "comunidade_primeira_acao")]),
+     [("membros", "comunidade_membros"), ("acessaram em 30 dias", "comunidade_login_30d")]),
     ("Outros", "Primeira Fila (site)", "desde 17/11",
      [("visitas", "pf_jornada_visitas"), ("viram um espaco", "pf_jornada_pag_espaco"),
       ("reservas pagas", "pf_reservas_pagas")]),

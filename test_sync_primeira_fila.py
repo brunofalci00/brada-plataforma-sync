@@ -29,8 +29,8 @@ def test_hunter_etapas_cumulativas_e_rotulos_vazios():
     linhas = pf.linhas_hunter([(D, None, "salao", "whatsapp", False, False, False, False, True),
                                (D, None, "salao", None, False, False, False, False, False)])
     por = {tuple(l[1:4]): l[4:] for l in linhas}
-    assert por[("sem cidade", "salao", "WhatsApp")] == [1, 1, 1, 1, 1, 1]
-    assert por[("sem cidade", "salao", "Sem envio")] == [1, 0, 0, 0, 0, 0]
+    assert por[("sem cidade", "salao", "WhatsApp")] == [1, 1, 0, 1, 1, 1]  # cadastro nao prova resposta
+    assert por[("sem cidade", "salao", "Nao abordado")] == [1, 0, 0, 0, 0, 0]
 
 
 def test_demanda_conta_cada_etapa_no_seu_dia():

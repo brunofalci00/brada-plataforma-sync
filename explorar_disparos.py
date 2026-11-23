@@ -214,14 +214,10 @@ def componentes_visao_geral(envios, fila, hoje):
     """Linhas de componentes para a Visao Geral: como a mesma IA divide os disparos entre as frentes."""
     zap = [e["dia"] for e in envios if e["canal"] == "whatsapp" and e["dia"]]
     nota = f"último WhatsApp em {max(zap).strftime('%d/%m')}" if zap else "sem WhatsApp"
-    inicio = hoje - datetime.timedelta(days=27)
-    fatias = [(n, sum(1 for e in envios if e["modalidade"] == m and e["dia"] and e["dia"] >= inicio))
-              for m, n in FRENTES]
     return [
         (dp.Serie("Capacidade da Brenda por semana (foto de hoje, sem filtro)", ["Semana"] + [n for _, n in FRENTES],
                   divisao_por_semana(envios, hoje), empilhado=True,
-                  subtitulo=f"A mesma IA dispara para as três frentes · {nota}"),
-         dp.Rosca("Divisão dos últimos 28 dias (sem filtro)", fatias)),
+                  subtitulo=f"A mesma IA dispara para as três frentes · {nota}"),),
         (dp.Tabela("Fila do alocador hoje (sem filtro)",
                    ["Frente", "Envios por dia (28d)", "Enviados hoje", "Esperando na fila", "Canal da fila"],
                    linhas_fila(envios, fila, hoje),

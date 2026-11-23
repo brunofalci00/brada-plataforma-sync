@@ -182,6 +182,13 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                 ["61 a 90 dias", m["vence_90d"] - m["vence_60d"]], ["91 a 180 dias", m["vence_180d"] - m["vence_90d"]],
                 ["Mais de 180 dias", max(m["proj_ativos"] - m["vence_180d"], 0)]],
                 subtitulo=f"{m.get('vence_3112', 0)} vencem em 31/12: prazo anual do DOU, a ONG renova, nao e evasao"))
+    if m.get("st_rascunho"):
+        p.linha(dp.Serie(f"O que falta nos {m['st_rascunho']} rascunhos (foto de hoje)", ["Situacao", "Rascunhos"], [
+            ["Faltam ate 3 campos (perto de publicar)", m.get("rasc_perto", 0)],
+            ["Sem o arquivo do Diario Oficial", m.get("rasc_sem_diario", 0)],
+            ["Sem descricao", m.get("rasc_sem_descricao", 0)],
+            ["Sem orcamento estimado", m.get("rasc_sem_orcamento", 0)]], tipo="BAR",
+            subtitulo="Um rascunho pode faltar mais de um item · os perto de publicar sao a fila da regua de e-mail"))
     p.linha(dp.Serie("Aptos a captar e usuarios ativos", ["Dia", "Aptos a captar", "Ativos em 30 dias"],
                      _tendencia(tendencia_rows), tipo="LINE", rotulos=False, subtitulo="Ultimos 60 dias"))
     if ga:

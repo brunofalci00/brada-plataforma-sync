@@ -13,7 +13,7 @@ def _resumo():
         "elaboracao_disparados": 707, "elaboracao_cadastros": 4, "aprovai_assinantes": 0,
         "aptos_sdr_disparados": 1986, "aptos_sdr_cadastros": 59, "aptos_sdr_aptos": 17,
         "plataforma_novos_cadastros": 156, "plataforma_novos_aptos": 57,
-        "comunidade_visitantes_30d": 480, "comunidade_primeira_acao": 84,
+        "comunidade_visitantes_30d": 480, "comunidade_login_30d": 120, "comunidade_primeira_acao": 84,
         "aprovai_visitas": 130, "aprovai_leads": 1, "pf_cliques_total": 882, "pf_jornada_visitas": 21,
         "pf_jornada_pag_espaco": 10, "pf_pedidos": 0, "pf_reservas_pagas": 0,
         "pf_produtor_abordados": 59, "pf_produtor_clicaram": 0, "pf_produtor_cadastros": 0,
