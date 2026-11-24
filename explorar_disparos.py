@@ -68,11 +68,20 @@ def nome_canal(c):
 
 
 def base(envios):
-    """Linhas agregadas [serial do dia, frente, canal, fonte, envios..resultado], em ordem de dia."""
-    return BASE.agregar(
-        (e["dia"], {"frente": NOME_FRENTE[e["modalidade"]], "canal": nome_canal(e["canal"]), "fonte": e["fonte"]},
-         etapas_do_envio(e))
-        for e in envios if e["dia"] and e["modalidade"] in NOME_FRENTE)
+    """Linhas agregadas [serial do dia, frente, canal, fonte, envios..resultado], em ordem de dia.
+    O resultado conta 1 por lead (no primeiro envio dele): 3 e-mails para quem se cadastrou nao viram 3 cadastros."""
+    def registros():
+        com_resultado = set()
+        for e in sorted((e for e in envios if e["dia"] and e["modalidade"] in NOME_FRENTE), key=lambda e: e["dia"]):
+            etapas = etapas_do_envio(e)
+            chave = (e["modalidade"], e.get("lead_hash"))
+            if etapas["resultado"] and e.get("lead_hash"):
+                if chave in com_resultado:
+                    etapas = dict(etapas, resultado=0)
+                com_resultado.add(chave)
+            yield (e["dia"], {"frente": NOME_FRENTE[e["modalidade"]], "canal": nome_canal(e["canal"]),
+                              "fonte": e["fonte"]}, etapas)
+    return BASE.agregar(registros())
 
 
 def fontes(linhas):
@@ -250,6 +259,9 @@ def leads_com_reuniao(sh, aba="raw_disparo_incentivador"):
     if not linhas:
         return frozenset()
     cab = linhas[0]
+    if "lead_id_hash" not in cab or "reuniao_ou_alem" not in cab:
+        print(f"[AVISO] {aba} com cabecalho inesperado: reunioes do Incentivador saem como 0 na aba Brenda")
+        return frozenset()
     i, j = cab.index("lead_id_hash"), cab.index("reuniao_ou_alem")
     return frozenset(l[i] for l in linhas[1:] if len(l) > j and l[j] == "sim")
 
@@ -261,6 +273,9 @@ def hashes_da_aba(sh, aba):
         linhas = sh.worksheet(aba).get_all_values()
     except gspread.exceptions.WorksheetNotFound:
         print(f"[AVISO] {aba} ausente: o resultado dessa frente sai como 0 na aba Brenda")
+        return frozenset()
+    if not linhas or not linhas[0] or linhas[0][0] != "lead_id_hash":
+        print(f"[AVISO] {aba} vazia ou com cabecalho inesperado: o resultado dessa frente sai como 0")
         return frozenset()
     return frozenset(l[0] for l in linhas[1:] if l and l[0])
 

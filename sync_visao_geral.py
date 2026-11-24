@@ -22,7 +22,7 @@ PRODUTOS = [
     # O card do Incentivador nasce sozinho ao abrir a agenda (robo): nao e etapa; o resultado e reuniao.
     ("Incentivador", "SDR Incentivador", "desde 01/09",
      [("disparados", "incentivador_disparados"), ("clicaram/responderam", "incentivador_engajaram"),
-      ("reunioes", "incentivador_reuniao")]),
+      ("reunioes", "incentivador_cards_reuniao")]),
     ("Proponente plataforma", "SDR Aptos", "desde 14/08",
      [("disparados", "aptos_sdr_disparados"), ("cadastraram", "aptos_sdr_cadastros"),
       ("projetos aptos", "aptos_sdr_aptos")]),
@@ -82,11 +82,13 @@ def linha_produto(publico, produto, periodo, etapas, v):
     return [publico, produto, periodo, cels[0], meio, cels[-1], dp.taxa(qtds[-1], qtds[0])]
 
 
-def linhas_alerta(v):
+def linhas_alerta(v, r):
     """[o que olhar, agora, dispara quando, situacao]: Brenda por frente, Incentivador, Plataforma, Primeira Fila."""
     out = []
     for nome, chave in FRENTES_BRENDA:
-        dias, sete = int(v(f"brenda_{chave}_dias_sem_envio")), int(v(f"brenda_{chave}_envios_7d"))
+        chave_dias = f"brenda_{chave}_dias_sem_envio"
+        dias = int(v(chave_dias)) if chave_dias in r else 99  # sem dado = alerta, nunca "ok"
+        sete = int(v(f"brenda_{chave}_envios_7d"))
         out.append([f"Brenda: disparos para {nome}", f"{dias} dias uteis sem envio ({sete} em 7 dias)",
                     f"mais de {LIMITE_PARADA} dias uteis sem envio", "AGIR" if dias > LIMITE_PARADA else "ok"])
     for nome, chave, limite, quando in ALERTAS:
@@ -99,20 +101,21 @@ def linhas_alerta(v):
     return sorted(out, key=lambda l: l[-1] != "AGIR")
 
 
-def montar_painel(r, agora):
+def montar_painel(r, agora, velhas=()):
     faltando = []
     v = lambda k: valor(r, k, faltando)  # noqa: E731
     p = dp.Painel(ABA, "Ecossistema Brada · visao geral",
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · numeros das abas de cada produto"
                   " · reunioes de incentivador no HubSpot · receita = MRR do AprovAI + comissao da Primeira Fila"
-                  " · disparos da Automatize em detalhe na aba Brenda")
+                  " · disparos da Automatize em detalhe na aba Brenda"
+                  + (f" · ATENCAO: {len(velhas)} numero(s) sao da ultima rodada que funcionou" if velhas else ""))
     p.linha(dp.Cartao("Projetos aptos a captar", v("plataforma_aptos")),
             dp.Cartao("Membros da Comunidade", v("comunidade_membros")),
             dp.Cartao("Reunioes: todas as origens", v("incentivador_pipeline_reuniao")),
             dp.Cartao("Reunioes: vindas da Brenda", v("incentivador_cards_reuniao")),
             dp.Cartao("Receita do mes", v("aprovai_mrr") + v("pf_comissao_mes"), dp.FMT_BRL))
     p.linha(dp.Tabela("Precisa de acao (AGIR primeiro)",
-                      ["O que olhar", "Agora", "Dispara quando", "Situacao"], linhas_alerta(v),
+                      ["O que olhar", "Agora", "Dispara quando", "Situacao"], linhas_alerta(v, r),
                       spans=[6, 3, 2, 1]))
     linhas = [linha_produto(*prod, v) for prod in PRODUTOS]
     p.linha(dp.Tabela("Funil de cada produto (o % de cada etapa e sobre a anterior; cada linha tem o seu periodo)",
@@ -127,7 +130,10 @@ def main():
     sh = sync.get_sheets_client().open_by_key(sync.SPREADSHEET_ID)
     svc = sync.build_sheets_service()
     resumo = dp.ler_resumo(svc, sync.SPREADSHEET_ID)
-    painel, faltando = montar_painel(resumo, agora)
+    velhas = dp.chaves_velhas(svc, sync.SPREADSHEET_ID, agora.date())
+    if velhas:
+        print(f"[AVISO] {len(velhas)} chave(s) do resumo sao de outro dia (passo falhou ou fonte fora): {velhas}")
+    painel, faltando = montar_painel(resumo, agora, velhas)
     if faltando:
         print(f"[AVISO] chaves ausentes no resumo (sairam como 0): {faltando}")
     painel.publicar(sh, svc, sync.SPREADSHEET_ID, indice=0)

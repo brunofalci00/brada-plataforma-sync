@@ -109,3 +109,9 @@ def test_cartao_de_contagem_nao_compara_base_pequena():
 def test_hash_do_lead_bate_com_o_do_sync():
     import sync
     assert sdr.hash_lead("abc-123") == sync.hash_id("abc-123") and sdr.hash_lead(None) == ""
+
+
+def test_resultado_conta_uma_vez_por_lead():
+    envios = [dict(_e(sdr.APTOS, D(2026, 11, d), cadastro=True), lead_hash="abc") for d in (3, 4, 5)]
+    linhas = ex.base(envios)
+    assert sum(l[-1] for l in linhas) == 1 and sum(l[4] for l in linhas) == 3  # 3 envios, 1 cadastro

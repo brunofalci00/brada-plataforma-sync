@@ -22,8 +22,10 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt pytest
 
+      # Portao: se algum teste falhar, nenhum passo publica (os passos abaixo exigem este verde).
       - name: Validar contrato de analytics
-        run: pytest -q test_analytics_contract.py test_sheets_retry.py test_sync_aprovai.py test_dashboard_painel.py test_sdr_automatize.py test_sync_incentivador.py test_painel_plataforma.py test_sync_primeira_fila.py test_sync_comunidade.py test_sync_visao_geral.py test_explorar_disparos.py
+        id: contrato
+        run: pytest -q
 
       - name: Sync Plataforma -> Sheets
         env:
@@ -50,7 +52,7 @@ jobs:
       # ganhou datastore.viewer em aprovai-de156, nao precisa mais da SA dedicada
       # aprovai-sa.json / APROVAI_FIREBASE_SERVICE_ACCOUNT_JSON.
       - name: Sync AprovAI -> Sheets
-        if: always()
+        if: always() && steps.contrato.outcome == 'success'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
@@ -68,7 +70,7 @@ jobs:
       # Aba Incentivador (junta as antigas SDR Incentivador e Disparo Incentivador):
       # banco do SDR Brada (so incentivador) + HubSpot ao vivo, do disparo a reuniao.
       - name: Sync Incentivador -> Sheets
-        if: always()
+        if: always() && steps.contrato.outcome == 'success'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
@@ -87,7 +89,7 @@ jobs:
 
       # Aba Primeira Fila: banco da Automatize, usuario so leitura (esquema dados).
       - name: Sync Primeira Fila -> Sheets
-        if: always()
+        if: always() && steps.contrato.outcome == 'success'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
@@ -100,7 +102,7 @@ jobs:
 
       # Aba Comunidade: Firestore + Auth de brada-comunidade-c1ba5, conta dashboard-leitura (so leitura).
       - name: Sync Comunidade -> Sheets
-        if: always()
+        if: always() && steps.contrato.outcome == 'success'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
@@ -114,7 +116,7 @@ jobs:
 
       # Aba Brenda (antes Explorar disparos): envios das 3 frentes agregados (sem PII) + filtros por formula.
       - name: Brenda (antes Explorar disparos) -> Sheets
-        if: always()
+        if: always() && steps.contrato.outcome == 'success'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
@@ -133,7 +135,7 @@ jobs:
       # Aba Visao Geral: le o resumo que os passos acima gravaram (dados_resumo) e a divisao
       # dos disparos no banco do SDR (sem o banco, sai sem esse bloco). Sempre por ultimo.
       - name: Visao Geral -> Sheets
-        if: always()
+        if: always() && steps.contrato.outcome == 'success'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}

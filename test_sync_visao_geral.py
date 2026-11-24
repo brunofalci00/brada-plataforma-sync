@@ -93,3 +93,16 @@ def test_assinante_do_aprovai_sem_percentual_sobre_lead():
     painel, _ = vg.montar_painel(_resumo(), AGORA)
     linha = next(l for l in _componente(painel, "Funil de cada produto").linhas if l[1] == "AprovAI (site e app)")
     assert linha[5] == "0 pagando hoje"
+
+
+def test_frente_da_brenda_sem_dado_vira_alerta():
+    resumo = _resumo()
+    del resumo["brenda_plataforma_dias_sem_envio"]
+    painel, _ = vg.montar_painel(resumo, AGORA)
+    alerta = {l[0]: l for l in _componente(painel, "Precisa de acao").linhas}
+    assert alerta["Brenda: disparos para Plataforma"][-1] == "AGIR"
+
+
+def test_numero_velho_aparece_no_rodape():
+    painel, _ = vg.montar_painel(_resumo(), AGORA, velhas=["aprovai_mrr"])
+    assert "ATENCAO: 1 numero" in painel.rodape
