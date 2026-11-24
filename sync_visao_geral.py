@@ -47,6 +47,11 @@ PRODUTOS = [
 ]
 FRENTES_BRENDA = [("Incentivador", "incentivador"), ("Elaboracao", "elaboracao"), ("Plataforma", "plataforma")]
 LIMITE_PARADA = 2  # mesmo corte da aba Brenda
+MIN_QUEDA = 20  # semana anterior com menos envios que isso nao entra no alerta de queda (oscila a toa)
+
+
+def caiu_pela_metade(sete, antes):
+    return antes >= MIN_QUEDA and sete * 2 < antes
 
 # Precisa de acao: (o que olhar, chave, limite, quando dispara). Dispara se valor > limite.
 # Sem coluna de dono por enquanto (Bruno, 23/11): os donos ainda nao estao combinados.
@@ -109,8 +114,15 @@ def linhas_alerta(v, r):
         chave_dias = f"brenda_{chave}_dias_sem_envio"
         dias = int(v(chave_dias)) if chave_dias in r else 99  # sem dado = alerta, nunca "ok"
         sete = int(v(f"brenda_{chave}_envios_7d"))
-        out.append([f"Brenda: disparos para {nome}", f"{dias} {'dia util' if dias == 1 else 'dias uteis'} sem envio ({sete} em 7 dias)",
-                    f"mais de {LIMITE_PARADA} dias uteis sem envio", "Agir" if dias > LIMITE_PARADA else "Em dia"])
+        chave_antes = f"brenda_{chave}_envios_7d_antes"
+        antes = int(v(chave_antes)) if chave_antes in r else None  # rodada antiga sem a chave: so o alerta de parada
+        agora = f"{sete} na semana" + (f", {antes} na anterior" if antes is not None else "")
+        if dias:
+            agora += f" · {dias} {'dia util' if dias == 1 else 'dias uteis'} sem envio"
+        agir = dias > LIMITE_PARADA or (antes is not None and caiu_pela_metade(sete, antes))
+        out.append([f"Brenda: disparos para {nome}", agora,
+                    f"parou {LIMITE_PARADA + 1}+ dias ou caiu à metade",
+                    "Agir" if agir else "Em dia"])
     for nome, chave, limite, quando in ALERTAS:
         n = int(v(chave))
         out.append([nome, dp.num_br(n), quando, "Agir" if n > limite else "Em dia"])
@@ -124,7 +136,7 @@ def linhas_alerta(v, r):
 def chaves_usadas():
     """Toda chave do resumo que a Visao Geral le (para o aviso de numero velho)."""
     chaves = {e[1] for *_, etapas in PRODUTOS for e in etapas} | {c for _, c, *_ in ALERTAS}
-    chaves |= {f"brenda_{c}_{s}" for _, c in FRENTES_BRENDA for s in ("dias_sem_envio", "envios_7d")}
+    chaves |= {f"brenda_{c}_{s}" for _, c in FRENTES_BRENDA for s in ("dias_sem_envio", "envios_7d", "envios_7d_antes")}
     return chaves | {"plataforma_aptos", "comunidade_membros", "incentivador_pipeline_reuniao",
                      "aprovai_mrr", "pf_comissao_mes", "pf_cliques_30d", "pf_conversas_30d"}
 

@@ -180,3 +180,14 @@ def test_filtro_fica_sem_acento_para_bater_com_a_base():
     import dashboard_painel as dp
     cel = dp._cel("Elaboracao", literal=True)
     assert cel["userEnteredValue"]["stringValue"] == "Elaboracao"
+
+
+def test_mesma_frente_tem_a_mesma_cor_em_qualquer_ordem():
+    import dashboard_painel as dp
+    a = dp.cores_das_series(["Incentivador", "Elaboracao", "Plataforma"])
+    b = dp.cores_das_series(["Plataforma", "Elaboração", "Incentivador"])
+    assert a == list(reversed(b))
+    assert dp.cores_das_series(["WhatsApp"]) == [dp.VERDE]
+    livres = dp.cores_das_series(["Taxa", "Incentivador"])
+    assert livres[0] != dp.LARANJA and livres[1] == dp.LARANJA
+    assert dp.cores_das_series(["E-mail + WhatsApp"]) == [dp.MARROM]

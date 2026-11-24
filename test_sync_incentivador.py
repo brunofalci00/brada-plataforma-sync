@@ -84,3 +84,9 @@ def test_painel_com_executivos_mostra_tabela_de_cobranca():
     assert "Sem executivo dono" in titulos
     assert "Reunioes da Brenda (desde o inicio)" in titulos and "Card ate reuniao" not in titulos
     assert not any(t.startswith("A Brenda esta disparando") for t in titulos)  # alerta mora na Brenda e na Visao Geral
+
+
+def test_card_sem_contato_fica_fora_e_e_contado_a_parte():
+    import sync_incentivador as si
+    ligados, sem = si.separar_cards([("l1", "d1"), (None, "d2"), ("l3", "d3")])
+    assert ligados == {"l1": "d1", "l3": "d3"} and sem == 1

@@ -119,3 +119,23 @@ def test_uma_unidade_fica_no_singular():
     assert vg.celula_etapa(1, "clicaram/responderam") == "1 clicou/respondeu"
     assert vg.celula_etapa(2, "reunioes") == "2 reunioes"
     assert vg.singular("com projeto apto") == "com projeto apto"
+
+
+def test_queda_de_volume_da_brenda_vira_agir_mesmo_sem_parar():
+    import sync_visao_geral as vg
+    r = {"brenda_elaboracao_dias_sem_envio": 0, "brenda_elaboracao_envios_7d": 30,
+         "brenda_elaboracao_envios_7d_antes": 175}
+    linha = next(l for l in vg.linhas_alerta(lambda k: r.get(k, 0), r) if "Elaboracao" in l[0])
+    assert linha[-1] == "Agir" and "175 na anterior" in linha[1]
+    assert not vg.caiu_pela_metade(5, 12)  # semana anterior pequena demais para alertar
+    assert not vg.caiu_pela_metade(100, 175)
+
+
+def test_resumo_traz_a_semana_anterior():
+    import datetime
+    import explorar_disparos as ed
+    import sdr_automatize as sdr
+    hoje = datetime.date(2026, 11, 24)
+    envios = [{"modalidade": sdr.APTOS, "dia": hoje - datetime.timedelta(days=d)} for d in (1, 8, 9, 13, 14, 20)]
+    out = ed.resumo_saude(envios, hoje)
+    assert out["brenda_plataforma_envios_7d"] == 1 and out["brenda_plataforma_envios_7d_antes"] == 3

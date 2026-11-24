@@ -37,6 +37,18 @@ VERMELHO = (0.80, 0.20, 0.15)
 # As 4 primeiras valem para quase tudo; as outras so entram em serie com 5+ categorias (ex.: origem).
 PALETA = [LARANJA, LARANJA_CLARO, CINZA, (0.55, 0.24, 0.05), (0.80, 0.80, 0.80), (0.85, 0.62, 0.12),
           (0.22, 0.22, 0.22), (0.98, 0.86, 0.76)]
+MARROM = (0.55, 0.24, 0.05)
+DOURADO = (0.85, 0.62, 0.12)
+CINZA_CLARO = (0.80, 0.80, 0.80)
+GRAFITE = (0.22, 0.22, 0.22)
+# Cor fixa por nome de serie: a mesma frente, canal ou origem tem a mesma cor em todas as abas.
+# Chave = slug do nome (sem acento, minusculo). Serie fora daqui usa a PALETA, pulando as cores ja usadas.
+CORES_FIXAS = {
+    "incentivador": LARANJA, "elaboracao": LARANJA_CLARO, "plataforma": CINZA,
+    "e_mail": LARANJA, "whatsapp": VERDE, "e_mail_whatsapp": MARROM,
+    "automatize": LARANJA, "leadlovers": MARROM, "meta_ads": DOURADO, "instagram": LARANJA_CLARO,
+    "comercial": GRAFITE, "site": CINZA, "outro": (0.98, 0.86, 0.76), "sem_origem": CINZA_CLARO,
+}
 FONTE = "Roboto"
 
 FMT_INT = {"type": "NUMBER", "pattern": "#,##0"}
@@ -273,6 +285,18 @@ class Funil(_Componente):
         return [ctx.grafico(pos, spec)]
 
 
+def cores_das_series(nomes):
+    """Cor de cada serie: fixa pelo nome quando ha (CORES_FIXAS), senao a proxima da PALETA ainda livre."""
+    fixas = [CORES_FIXAS.get(re.sub("_+", "_", slug(str(n)))) for n in nomes]
+    livres = [c for c in PALETA if c not in fixas] or PALETA
+    saida, k = [], 0
+    for f in fixas:
+        if f is None:
+            f, k = livres[k % len(livres)], k + 1
+        saida.append(f)
+    return saida
+
+
 class Serie(_Componente):
     """Grafico de categoria x N series: COLUMN, BAR, LINE ou AREA.
 
@@ -303,9 +327,10 @@ class Serie(_Componente):
         n_series = len(self.cabecalho) - 1
         eixo_valor = "BOTTOM_AXIS" if self.tipo == "BAR" else "LEFT_AXIS"
         series = []
+        cores = self.cores if self.cores is not PALETA else cores_das_series(self.cabecalho[1:])
         for i in range(n_series):
             s = {"series": ctx.src(r0, r0 + n, i + 1, i + 2), "targetAxis": eixo_valor,
-                 "colorStyle": cor(self.cores[i % len(self.cores)])}
+                 "colorStyle": cor(cores[i % len(cores)])}
             if self.tipo == "LINE":
                 s["lineStyle"] = {"width": 3}
             if self.rotulos and not self.empilhado and n_series == 1 and self.tipo in ("COLUMN", "BAR"):

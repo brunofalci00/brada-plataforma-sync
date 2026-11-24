@@ -116,9 +116,11 @@ CONSULTA_DIARIO = BASE + """
 
 TZ = "America/Sao_Paulo"
 
-# Um registro por espaco captado, na data da captacao; etapas = estado de hoje.
+# Um registro por espaco, na data do 1o contato (ou da captacao, se ainda nao foi abordado); etapas = estado
+# de hoje. Datar pela captacao punha no periodo espacos captados num lote e abordados semanas depois.
 CONSULTA_HUNTER = f"""
-    select (l.created_at at time zone '{TZ}')::date, l.cidade, l.categoria,
+    select (coalesce((select min(e.enviado_em) from dados.hunter_envios e where e.lead_id = l.id),
+                     l.disparado_em, l.created_at) at time zone '{TZ}')::date, l.cidade, l.categoria,
            (select e.canal from dados.hunter_envios e where e.lead_id = l.id order by e.enviado_em limit 1),
            l.disparado_em is not null or exists (select 1 from dados.hunter_envios e where e.lead_id = l.id),
            exists (select 1 from dados.hunter_envios e where e.lead_id = l.id and e.respondeu_em is not null),
@@ -343,8 +345,8 @@ def montar_painel(dados, agora, web=None):
                               subtitulo="Cada etapa na data em que aconteceu · so o filtro de cidade vale aqui"))
     painel.linha(fl.comparacao_ab("Reservas: periodo A contra periodo B", fd, FUNIL_DEMANDA))
     painel.linha(fl.FunilVivo("Anfitriao: prospeccao de espacos, do contato ao cadastro (periodo A)", fh, FUNIL_HUNTER,
-                              altura=360, subtitulo="Prospeccao automatica da Automatize · espaco na data em que foi"
-                                                    " encontrado · etapas = estado de hoje"),
+                              altura=360, subtitulo="Prospeccao automatica da Automatize · espaco na data do 1o contato"
+                                                    " (ou da captacao, se ainda nao abordado) · etapas = estado de hoje"),
                  fl.evolucao("Cliques nos espacos do guia no periodo A", fd, "cliques", "cidade", cidades[:6],
                              subtitulo="Por dia ou semana, empilhado pelas 6 cidades com mais volume"))
     pl, resumo_produtor = pf_produtor.blocos(painel, ctl, dados)
