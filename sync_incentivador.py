@@ -112,7 +112,7 @@ def pipeline_hubspot(hs):
             ["Trazidos pelos executivos", hs["total_executivo"], sum(1 for r in rows if r[2] == "Executivo Brada")]]
 
 
-def montar_painel(leads, hs, agora, executivos=(), envios=None):
+def montar_painel(leads, hs, agora, executivos=(), envios=None, sem_contato=0):
     """Filtros no topo (periodo A/B, canal, fonte), funil do disparo ao ganho e a foto do pipeline."""
     linhas = linhas_base(leads)
     fontes = BASE.opcoes(linhas, "fonte")
@@ -122,7 +122,9 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
     flt = fl.Filtros(ctl, BASE)
     p = dp.Painel(ABA, "Incentivador · do disparo da Brenda ao patrocinio fechado",
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + HubSpot ao vivo · "
-                  "leads contados na data do 1o disparo; mude as células claras abaixo")
+                  "leads contados na data do 1o disparo; mude as células claras abaixo"
+                  + (f" · {sem_contato} card(s) do HubSpot sem contato ligado no banco da Automatize ficam fora"
+                     if sem_contato else ""))
     p.linha(ctl)
 
     def ab(etapa):
@@ -178,17 +180,29 @@ def montar_raw(leads):
              "sim" if l["bounce"] else "nao"] for lid, l in leads.items()]
 
 
+def separar_cards(pares):
+    """{lead_id: deal_id} so dos cards ligados a um contato da Brenda; e quantos cards nao tem contato.
+
+    Card sem contato (lead_id vazio) nao tem envio da Brenda que o explique: entrar na conta faria a Visao Geral
+    mostrar uma reuniao "vinda da Brenda" que a aba Brenda nao consegue ligar a nenhum disparo."""
+    ligados = {str(lead): deal for lead, deal in pares if lead is not None}
+    return ligados, sum(lead is None for lead, _ in pares)
+
+
 def coletar():
     conn = sdra.conectar()
     try:
         envios = sdra.envios(conn, sdra.INCENTIVADOR)
         cur = conn.cursor()
         cur.execute(CONSULTA_CARDS)
-        cards_por_lead = {str(lead): deal for lead, deal in cur.fetchall()}
+        pares = cur.fetchall()
     finally:
         conn.close()
+    cards_por_lead, sem_contato = separar_cards(pares)
+    if sem_contato:
+        print(f"[AVISO] {sem_contato} card(s) no HubSpot sem contato ligado no banco da Automatize: fora da conta")
     cards = hub.cards_ao_vivo(list(cards_por_lead.values()))
-    return envios, cards_por_lead, cards
+    return envios, cards_por_lead, cards, sem_contato
 
 
 def main():
@@ -200,7 +214,7 @@ def main():
 
     agora = datetime.datetime.now(sync.BRT)
     print("Banco do SDR Brada (so incentivador) + estagios ao vivo...")
-    envios, cards_por_lead, cards = coletar()
+    envios, cards_por_lead, cards, sem_contato = coletar()
     estagios = {d: c["estagio"] for d, c in cards.items()}
     passou = {d: c.get("passou_reuniao", False) for d, c in cards.items()}
     leads = completar(sdra.por_lead(envios), cards_por_lead, estagios, passou)
@@ -216,7 +230,7 @@ def main():
             "raw_hubspot_incentivador": (hub.HEADER_RAW, hs["rows"])}
     sync.pii_guard(tabs)
     print("pii_guard: OK (zero hits)")
-    painel, resumo, linhas = montar_painel(leads, hs, agora, executivos, envios)
+    painel, resumo, linhas = montar_painel(leads, hs, agora, executivos, envios, sem_contato)
 
     if args.dry_run:
         print("--dry-run: nada escrito.", resumo)

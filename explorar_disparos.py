@@ -206,12 +206,16 @@ def linhas_saude(envios, hoje, frentes=None, fila=None):
 
 
 def resumo_saude(envios, hoje):
-    """Chaves brenda_<frente>_dias_sem_envio e _envios_7d para o alerta da Visao Geral."""
+    """Chaves brenda_<frente>_dias_sem_envio, _envios_7d e _envios_7d_antes (8 a 14 dias atras) para o alerta
+    da Visao Geral: parada e queda de volume."""
     out = {}
     for (m, nome), linha in zip(FRENTES, linhas_saude(envios, hoje)):
         chave = dp.slug(nome)
         out[f"brenda_{chave}_dias_sem_envio"] = linha[2] if isinstance(linha[2], int) else 99
         out[f"brenda_{chave}_envios_7d"] = linha[3]
+        out[f"brenda_{chave}_envios_7d_antes"] = sum(
+            1 for e in envios if e.get("modalidade") == m and e["dia"]
+            and hoje - datetime.timedelta(days=14) < e["dia"] <= hoje - datetime.timedelta(days=7))
     return out
 
 
