@@ -1512,8 +1512,10 @@ def write_overwrite(sh, name, header, rows):
                               cols=max(len(header), 4))
     if ws.row_count < len(rows) + 1 or ws.col_count < len(header):
         ws.resize(rows=max(ws.row_count, len(rows) + 100), cols=max(ws.col_count, len(header)))
-    sh.batch_update({"requests": [analytics.atomic_replace_request(
-        ws.id, ws.row_count, ws.col_count, header, rows)]})
+    reqs = [analytics.atomic_replace_request(ws.id, ws.row_count, ws.col_count, header, rows)]
+    if name.startswith("raw_") and not ws.isSheetHidden:  # aba de dados cru nao aparece para quem abre a planilha
+        reqs.append({"updateSheetProperties": {"properties": {"sheetId": ws.id, "hidden": True}, "fields": "hidden"}})
+    sh.batch_update({"requests": reqs})
     print(f"  {name}: {len(rows)} linhas (overwrite)")
     return ws
 

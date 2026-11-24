@@ -464,14 +464,13 @@ def main():
         "raw_asaas_aprovai": (HEADER_ASAAS, asaas_rows),
         "raw_funil_aprovai": (HEADER_FUNIL, funil_rows),
     }
-    sync.pii_guard(tabs)
-    print("pii_guard: OK (zero hits)")
-
     print("Puxando banco do SDR Brada (so elaboracao)...")
     leads_elab, envios_elab = coletar_elaboracao(pre_approvals["lead_ids"])
     if leads_elab is not None:
         tabs["raw_elaboracao_assinantes"] = (["lead_id_hash"], [[sync.hash_id(lid)] for lid, l in leads_elab.items()
                                                                   if l.get("assinou")])
+    sync.pii_guard(dict(tabs, origens_assinantes=(["origem", "n"], [list(o) for o in pre_approvals["origens"]])))
+    print("pii_guard: OK (zero hits)")
     painel, resumo_kpi, bases = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now,
                                               web_visitas.coletar("aprovai", now.date()))
     print("  resumo:", resumo_kpi)

@@ -108,8 +108,13 @@ class Base:
         return sorted((v for v in total if seguro(v)), key=lambda v: (-total[v], v))
 
     def publicar(self, sh, svc, spreadsheet_id, linhas):
-        """Texto vai RAW (nunca vira formula); a coluna A ganha formato de data; aba escondida."""
+        """Texto vai RAW (nunca vira formula); a coluna A ganha formato de data; aba escondida.
+        Passa pelo pii_scan antes: base so leva agregado (dia, dimensao, contagem)."""
         import gspread
+        import sync
+        hits = sync.pii_scan(self.cabecalho, linhas)
+        if hits:
+            raise SystemExit(f"[PII] {self.aba}: {len(hits)} celula(s) com cara de dado pessoal; nada publicado")
         try:
             ws = sh.worksheet(self.aba)
         except gspread.exceptions.WorksheetNotFound:
@@ -313,8 +318,8 @@ def comparacao_ab(titulo, flt, etapas, maturacao=None):
     def soma(etapa, p):
         if not maturacao:
             return flt.soma_p(etapa, p)
-        de, ate = flt.periodo(p)
-        return flt.soma(etapa, de, f"MIN({ate};TODAY()-{maturacao})")
+        de, ate = flt.periodo(p)  # desloca inicio e fim juntos: A e B seguem com o mesmo numero de dias
+        return flt.soma(etapa, f"({de}-{maturacao})", f"({ate}-{maturacao})")
     if maturacao:
         titulo = f"{titulo}, so leads abordados ha {maturacao}+ dias"
     topo_a, topo_b = soma(etapas[0][1], "A"), soma(etapas[0][1], "B")

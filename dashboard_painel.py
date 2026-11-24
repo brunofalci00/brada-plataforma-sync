@@ -525,6 +525,12 @@ def ler_resumo(svc, spreadsheet_id):
     return {k: v for k, v, _ in _linhas_resumo(svc, spreadsheet_id)}
 
 
+def chaves_velhas(svc, spreadsheet_id, hoje):
+    """Chaves do resumo gravadas antes de hoje (passo que falhou ou fonte fora): o numero e de outro dia."""
+    return sorted(k for k, _, quando in _linhas_resumo(svc, spreadsheet_id)
+                  if str(quando)[:10] < hoje.isoformat())
+
+
 def gravar_resumo(sh, svc, spreadsheet_id, valores, agora):
     """Mescla `valores` no resumo (chaves de outros canais ficam como estao)."""
     import gspread
@@ -537,7 +543,9 @@ def gravar_resumo(sh, svc, spreadsheet_id, valores, agora):
     for k, v in valores.items():
         linhas[k] = [k, _numero(v), carimbo]
     corpo = [["chave", "valor", "atualizado"]] + [linhas[k] for k in sorted(linhas)]
-    svc.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range=f"'{ABA_RESUMO}'").execute()
+    # Sem clear antes: se o update falhar, o resumo antigo fica inteiro (a Visao Geral nao zera).
+    # Linhas vazias no fim apagam chaves que sairam; o resumo nunca encolhe mais que 50 linhas por rodada.
+    corpo += [["", "", ""]] * 50
     svc.spreadsheets().values().update(spreadsheetId=spreadsheet_id, range=f"'{ABA_RESUMO}'!A1",
                                        valueInputOption="RAW", body={"values": corpo}).execute()
     if not ws.isSheetHidden:
