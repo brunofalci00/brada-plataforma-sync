@@ -134,6 +134,7 @@ CONSULTA_HUNTER = f"""
 CONSULTA_DEMANDA = BASE + f"""
     select (c.clicked_at at time zone '{TZ}')::date, e.cidade, 'cliques' from cliques_reais c
       join espacos_reais e on e.protocol = c.venue_protocol
+      where (c.clicked_at at time zone '{TZ}')::date >= date '2026-11-17'  -- contagem nova (1 por pessoa/espaco/dia)
     union all select (c.criada_em at time zone '{TZ}')::date, e.cidade, 'conversas' from conversas_reais c
       join espacos_reais e on e.id = c.venue_id
     union all select (r.created_at at time zone '{TZ}')::date, e.cidade, 'pedidos' from reservas_reais r
@@ -317,15 +318,15 @@ def montar_painel(dados, agora, web=None):
     cidades = list(dict.fromkeys(BASE_HUNTER.opcoes(hl, "cidade") + BASE_DEMANDA.opcoes(dl, "cidade"))) or ["sem cidade"]
     canais = BASE_HUNTER.opcoes(hl, "canal") or ["Nao abordado"]
     ctl = fl.controles(ABA, hoje, [fl.campo_lista("cidade", "Cidade", cidades, span=2),
-                                   fl.campo_lista("categoria", "Categoria (Hunter)",
+                                   fl.campo_lista("categoria", "Categoria do espaco",
                                                   BASE_HUNTER.opcoes(hl, "categoria"), span=2),
-                                   fl.campo_lista("canal", "Canal de prospeccao", canais, todos=fl.TODOS)])
+                                   fl.campo_lista("canal", "Canal", canais, todos=fl.TODOS)])
     jl = linhas_jornada(dados.get("anfitriao_linhas", []), dados.get("demanda_linhas", []), web)
     fh, fd, fj = fl.Filtros(ctl, BASE_HUNTER), fl.Filtros(ctl, BASE_DEMANDA), fl.Filtros(ctl, BASE_JORNADA)
     painel = dp.Painel(ABA, "Primeira Fila · do espaco captado a reserva paga",
                        f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco da Primeira Fila"
-                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · clique contado 1 por pessoa, espaco"
-                       f" e dia desde {MUDANCA_CLIQUES} · mude as células claras abaixo")
+                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · cliques so desde 17/11 (1 por pessoa,"
+                       f" espaco e dia) · mude as células claras abaixo")
     painel.linha(ctl)
     painel.linha(fl.CartaoVivo("Visitas ao site (desde 17/11)", fj.soma_p("visitas", "A"), fj.soma_p("visitas", "B")),
                  fl.CartaoVivo("Cliques nos espacos", fd.soma_p("cliques", "A"), fd.soma_p("cliques", "B")),

@@ -560,8 +560,15 @@ class Painel:
         self.linhas = []
 
     def linha(self, *componentes):
-        """Componente None ou sem conteudo (ex.: rosca de uma fatia so) sai da linha; os outros alargam."""
-        self.linhas.append([c for c in componentes if c is not None and c.tem_conteudo()])
+        """Componente None ou sem conteudo (ex.: rosca de uma fatia so) sai da linha; os outros alargam.
+        Tabela (em celulas) nao divide linha com grafico (flutua por cima): cada uma vai para a sua linha."""
+        comps = [c for c in componentes if c is not None and c.tem_conteudo()]
+        celulas = [c for c in comps if getattr(c, "em_celulas", False)]
+        if celulas and len(celulas) < len(comps):
+            self.linhas.append([c for c in comps if not getattr(c, "em_celulas", False)])
+            self.linhas.extend([c] for c in celulas)
+            return self
+        self.linhas.append(comps)
         return self
 
     def layout(self):
