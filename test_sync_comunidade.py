@@ -159,3 +159,23 @@ def test_voltou_conta_uso_depois_do_dia_do_cadastro():
     voltou = {"createdAt": str(agora - 10 * dia), "lastRefreshAt": "2026-11-23T10:00:00Z"}
     assert not sc.voltou_30d(so_cadastro, agora) and sc.voltou_30d(voltou, agora)
     assert not sc.voltou_30d({"createdAt": "0"}, agora)
+
+
+def test_voltou_pelo_last_active_at_do_app_num_dia_seguinte():
+    agora = int(datetime.datetime(2026, 11, 25, 15, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+    cadastro = int(datetime.datetime(2026, 11, 25, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000)  # 24/11 22h BRT
+    conta = {"createdAt": str(cadastro)}
+    assert not sc.voltou_30d(conta, agora)
+    assert not sc.voltou_30d(conta, agora, "2026-11-25T02:00:00Z")  # mesmo dia de Brasilia
+    assert sc.voltou_30d(conta, agora, "2026-11-25T11:00:00Z")  # dia seguinte, menos de 24h depois
+
+
+def test_calcular_le_last_active_at_dos_usuarios():
+    agora = int(datetime.datetime(2026, 11, 25, 15, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+    criado = str(agora - 5 * sc.DIA_MS)
+    vazias = ["activation_events", "community_posts", "user_connections", "articles",
+              "courses", "opportunities", "events", "direct_messages"]
+    dados = {"users": [{"_id": "u1", "lastActiveAt": "2026-11-25T11:00:00Z"}, {"_id": "u2"}],
+             "auth": [{"localId": "u1", "createdAt": criado}, {"localId": "u2", "createdAt": criado}],
+             "ga": None, **{n: [] for n in vazias}}
+    assert sc.calcular(dados, agora)["voltaram_30d"] == 1
