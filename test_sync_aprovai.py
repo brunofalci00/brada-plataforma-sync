@@ -153,7 +153,7 @@ def test_painel_sem_banco_do_sdr_fica_so_com_o_app():
     assert "Site do AprovAI (periodo A)" in titulos
     assert "elaboracao_disparados" not in kpis and kpis["aprovai_visitas"] == 7
     (_, site), (_, elab) = bases
-    assert site[0][1:] == [7, 1, 1] and elab == []
+    assert site[0][1:] == [7, 1, 1, 0, 0] and elab == []  # checkout e compras zerados sem o evento
 
 
 def test_cpf_valido_aceita_cpf_real_e_recusa_sequencia():
@@ -219,3 +219,30 @@ def test_equipe_somosbrada_e_teste_nao_contam():
     from sync_aprovai import is_teste_ou_staff
     assert is_teste_ou_staff({"email": "fulano@somosbrada.com.br"}) and is_teste_ou_staff({"email": "x@teste.com"})
     assert not is_teste_ou_staff({"email": "cliente@gmail.com"})
+
+
+def test_clique_de_login_nao_conta_como_ida_ao_checkout():
+    from sync_aprovai import coletar_funil_rows, funil_site, rotulo_checkout
+
+    class Doc:
+        def __init__(self, d):
+            self.d = d
+
+        def to_dict(self):
+            return self.d
+
+    eventos = [Doc({"type": "cta_click", "ctaId": "hero_main_cta", "timestamp": "2026-11-20T10:00:00Z"}),
+               Doc({"type": "cta_click", "ctaId": "login_email_submit", "timestamp": "2026-11-20T10:01:00Z"}),
+               Doc({"type": "cta_click", "ctaId": "header_member_login", "timestamp": "2026-11-20T10:02:00Z"}),
+               Doc({"type": "purchase_completed", "timestamp": "2026-11-20T10:05:00Z"})]
+
+    class Db:
+        def collection(self, nome):
+            return type("C", (), {"stream": lambda self: iter(eventos)})()
+
+    rows = coletar_funil_rows(Db())
+    assert rows[0][2] == 1 and rows[0][6] == 1 and rows[0][5] == 0
+    assert [n for n, _ in funil_site(rows)] == ["Visitas a pagina", "Clicaram em comprar", "Compraram"]
+    assert rotulo_checkout(rows) == "Clique em comprar ate a compra"
+    rows[0][5] = 3  # o evento do checkout chegou: ele vira o topo da taxa
+    assert "Abriram o checkout" in [n for n, _ in funil_site(rows)] and rotulo_checkout(rows) == "Checkout ate a compra"

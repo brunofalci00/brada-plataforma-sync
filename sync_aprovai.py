@@ -67,7 +67,8 @@ HEADER_ASAAS = [
     "sync_em", "payment_id_hash", "customer_id_hash", "status", "value",
     "billing_type", "date_created", "due_date", "e_teste_ou_staff",
 ]
-HEADER_FUNIL = ["data", "visualizacoes_pagina", "cliques_cta", "leads_enviados", "fonte"]
+HEADER_FUNIL = ["data", "visualizacoes_pagina", "cliques_comprar", "leads_enviados", "fonte", "checkout_aberto",
+                "compras"]
 
 
 # ===================================================
@@ -261,6 +262,15 @@ def lead_de_teste(evento):
     return bool(cpf) and not cpf_valido(cpf)
 
 
+def clique_de_compra(evento):
+    """So o botao que leva ao checkout ("Garantir Meu Acesso"): os botoes de login tambem sao cta_click."""
+    return "login" not in str(evento.get("ctaId") or "").lower()
+
+
+def _n(r, i):
+    return r[i] if len(r) > i and isinstance(r[i], (int, float)) else 0
+
+
 def coletar_funil_rows(db):
     eventos = list(db.collection("analytics_funnel_events").stream())
     por_dia = {}
@@ -273,14 +283,16 @@ def coletar_funil_rows(db):
         t = d.get("type")
         if t == "lead_captured" and lead_de_teste(d):
             continue
-        if t in ("page_view", "cta_click", "lead_captured"):
+        if t == "cta_click" and not clique_de_compra(d):
+            continue
+        if t in ("page_view", "cta_click", "lead_captured", "checkout_view", "purchase_completed"):
             por_dia[dia][t] += 1
 
     rows = []
     for dia in sorted(por_dia.keys()):
         c = por_dia[dia]
         rows.append([dia, c["page_view"], c["cta_click"], c["lead_captured"],
-                     "Firestore analytics_funnel_events (aprovai-de156)"])
+                     "Firestore analytics_funnel_events (aprovai-de156)", c["checkout_view"], c["purchase_completed"]])
     return rows
 
 
@@ -310,8 +322,15 @@ def funil_elaboracao(leads):
             ("Assinaram o AprovAI", sum(l.get("assinou", False) for l in v))]
 
 
+def rotulo_checkout(funil_rows):
+    """Meta da Tamyris (24/11): assinaturas sobre visitantes do checkout."""
+    if tem_checkout(funil_rows):
+        return "Checkout ate a compra"
+    return "Clique em comprar ate a compra"
+
+
 def funil_app(funil_rows, resumo):
-    return [("Visitas a pagina", sum(r[1] for r in funil_rows)), ("Cliques no botao", sum(r[2] for r in funil_rows)),
+    return [("Visitas a pagina", sum(r[1] for r in funil_rows)), ("Clicaram em comprar", sum(r[2] for r in funil_rows)),
             ("Leads", sum(r[3] for r in funil_rows)), ("Assinantes pagantes", resumo["assinantes_reais_ativos"])]
 
 
@@ -332,8 +351,25 @@ def visitas_por_dia(funil_rows, hoje, dias=30):
 
 ABA = "AprovAI"
 BASE_SITE = fl.Base("base_aprovai_site", [], [
-    ("visitas", "Visitas"), ("cliques", "Cliques no botao"), ("leads", "Leads")])
-FUNIL_SITE = [("Visitas a pagina", "visitas"), ("Cliques no botao", "cliques"), ("Leads", "leads")]
+    ("visitas", "Visitas"), ("cliques", "Clicaram em comprar"), ("leads", "Leads"), ("checkout", "Abriram o checkout"),
+    ("compras", "Compraram")])
+
+
+def tem_checkout(funil_rows):
+    """O evento de abertura do checkout (pedido ao Thiago em 24/11) ja chegou? Ate la, o clique em comprar
+    ("Garantir Meu Acesso", que leva ao checkout) faz as vezes de visitante do checkout."""
+    return any(_n(r, 5) for r in funil_rows)
+
+
+def funil_site(funil_rows):
+    etapas = [("Visitas a pagina", "visitas"), ("Clicaram em comprar", "cliques")]
+    if tem_checkout(funil_rows):
+        etapas.append(("Abriram o checkout", "checkout"))
+    return etapas + [("Compraram", "compras")]
+
+
+def topo_do_checkout(funil_rows):
+    return "checkout" if tem_checkout(funil_rows) else "cliques"
 BASE_ELAB = fl.Base("base_aprovai_brenda", [("canal", "Canal", fl.TODOS), ("fonte", "Fonte", fl.TODAS)], [
     ("disparados", "Disparados"), ("entregues", "Entregues"), ("abriram", "Abriram"),
     ("engajaram", "Clicaram ou responderam"), ("cadastro", "Cadastro")])
@@ -344,7 +380,8 @@ CANAIS = ["E-mail", "WhatsApp", "E-mail + WhatsApp"]
 
 def linhas_site(funil_rows):
     return BASE_SITE.agregar(
-        (datetime.date.fromisoformat(r[0]), {}, {"visitas": r[1], "cliques": r[2], "leads": r[3]})
+        (datetime.date.fromisoformat(r[0]), {}, {"visitas": r[1], "cliques": r[2], "leads": r[3],
+                                                  "checkout": _n(r, 5), "compras": _n(r, 6)})
         for r in funil_rows if r[0])
 
 
@@ -381,7 +418,8 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
     p.linha(dp.Cartao("Assinantes pagando (Asaas, hoje)", resumo["assinantes_reais_ativos"]),
             dp.Cartao("Receita recorrente (MRR, Asaas, hoje)", resumo["mrr_real"], dp.FMT_BRL),
             fl.CartaoVivo("Site: visitas a pagina", fs.soma_p("visitas", "A"), fs.soma_p("visitas", "B")),
-            fl.CartaoVivo("Site: leads", fs.soma_p("leads", "A"), fs.soma_p("leads", "B")))
+            fl.CartaoVivo(rotulo_checkout(funil_rows), fs.taxa("compras", "A", sobre=topo_do_checkout(funil_rows)),
+                          fs.taxa("compras", "B", sobre=topo_do_checkout(funil_rows)), dp.FMT_PCT))
     p.linha(dp.Funil("Assinantes: quantos pagam de fato (hoje, sem equipe e teste)", [
                 ("Liberados no app", pre_approvals["total_ativos_no_app"]),
                 ("Com plano contratado", pre_approvals["com_billing_asaas_real"]),
@@ -395,12 +433,15 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
                       [[o, n] for o, n in pre_approvals.get("origens", [])]
                       + [["Dos quais vieram de um disparo da Brenda (medido desde 23/11)", brenda]],
                       formatos=[None, dp.FMT_INT], spans=[9, 3]))
-    aviso_site = ("Contagem do proprio site (cada pagina vista) · o Google Analytics, mais abaixo, conta sessoes"
-                  " desde 16/11, por isso da numero menor")
-    p.linha(fl.FunilVivo("Site do AprovAI (periodo A)", fs, FUNIL_SITE, altura=340, subtitulo=aviso_site),
+    aviso_site = ("Contagem do proprio site · 'Clicaram em comprar' = botao Garantir Meu Acesso, que leva ao checkout"
+                  " (o login fica fora) · o Google Analytics, mais abaixo, conta sessoes desde 16/11")
+    p.linha(fl.FunilVivo("Site do AprovAI (periodo A)", fs, funil_site(funil_rows), altura=340, subtitulo=aviso_site),
             _visitas_vivas(fs))
     elab = funil_elaboracao(leads_elab) if leads_elab is not None else None
+    topo = 5 if tem_checkout(funil_rows) else 2
     resumo_kpi = {"aprovai_visitas": app[0][1], "aprovai_leads": app[2][1],
+                  "aprovai_checkout": sum(_n(r, topo) for r in funil_rows),
+                  "aprovai_compras": sum(_n(r, 6) for r in funil_rows),
                   "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],
                   "aprovai_ativos_app": pre_approvals["total_ativos_no_app"]}
     if elab:
