@@ -105,10 +105,19 @@ def _ms_iso(texto):
         return 0
 
 
-def voltou_30d(conta, agora_ms):
-    """Usou a Comunidade nos ultimos 30 dias, pelo menos 1 dia depois do cadastro."""
-    uso, criado = _ms_iso(conta.get("lastRefreshAt") or ""), int(conta.get("createdAt", 0) or 0)
-    return bool(uso) and (agora_ms - uso) <= 30 * DIA_MS and (uso - criado) >= DIA_MS
+def _dia_brt(ms):
+    return datetime.datetime.fromtimestamp(ms / 1000, sync.BRT).date()
+
+
+def ultimo_uso(conta, ultimo_ativo=None):
+    """Ultimo uso conhecido: a sessao renovada (Auth) ou o lastActiveAt do app (Firestore, desde 24/11)."""
+    return max(_ms_iso(conta.get("lastRefreshAt") or ""), _ms_iso(ultimo_ativo or ""))
+
+
+def voltou_30d(conta, agora_ms, ultimo_ativo=None):
+    """Usou a Comunidade nos ultimos 30 dias, num dia (de Brasilia) depois do dia do cadastro."""
+    uso, criado = ultimo_uso(conta, ultimo_ativo), int(conta.get("createdAt", 0) or 0)
+    return bool(uso) and (agora_ms - uso) <= 30 * DIA_MS and _dia_brt(uso) > _dia_brt(criado)
 
 
 def _taxa(parte, todo):
@@ -119,6 +128,7 @@ def calcular(dados, agora_ms):
     reais = [u for u in dados["users"] if not e_equipe(u)]
     papeis = collections.Counter(u.get("role") for u in reais)
     auth = [a for a in dados["auth"] if not e_equipe_email(a.get("email"))]
+    ativo = {u.get("_id"): _texto_data(u.get("lastActiveAt")) for u in dados["users"] if u.get("lastActiveAt")}
 
     def dias_desde(a, campo):
         return (agora_ms - int(a.get(campo, 0) or 0)) / DIA_MS
@@ -150,8 +160,9 @@ def calcular(dados, agora_ms):
         "login_7d": sum(1 for a in auth if dias_desde(a, "lastLoginAt") <= 7),
         "login_30d": sum(1 for a in auth if dias_desde(a, "lastLoginAt") <= 30),
         # lastLoginAt so muda em login explicito (o cadastro conta como login): 99% "acessaram" era so cadastro.
-        # lastRefreshAt renova com a sessao em uso; volta = uso nos ultimos 30 dias, 1+ dia depois do cadastro.
-        "voltaram_30d": sum(1 for a in auth if voltou_30d(a, agora_ms)),
+        # Uso = lastRefreshAt (sessao) ou lastActiveAt (app, 1x/dia desde 24/11); volta = uso nos ultimos
+        # 30 dias num dia de Brasilia depois do dia do cadastro.
+        "voltaram_30d": sum(1 for a in auth if voltou_30d(a, agora_ms, ativo.get(a.get("localId")))),
         "voltaram_7d": _taxa(len(voltaram_7d), len(elegiveis_7d)),
         "primeira_acao": len(primeiras_acoes(dados)),
         "acao_evento": acoes.get("event_external_click", 0),
