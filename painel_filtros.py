@@ -254,11 +254,16 @@ MIN_BASE_COMPARACAO = 20  # periodo B com menos que isso (antes do lancamento, b
 
 
 class CartaoVivo(dp.Cartao):
+    """formula_b None = sem comparacao (quando a seta enganaria, ex.: posicao no Google, menor e melhor)."""
+
     def __init__(self, titulo, formula_a, formula_b, formato=dp.FMT_INT):
-        super().__init__(titulo, 0, formato, base=0, descricao_base="vs período B")
+        super().__init__(titulo, 0, formato, base=None if formula_b is None else 0,
+                         descricao_base="vs periodo anterior")
         self.fa, self.fb = formula_a, formula_b
 
     def bloco(self):
+        if self.fb is None:
+            return [[self.titulo], [F(self.fa)]]
         # Base zero vira vazio: o cartao do Sheets mostraria "####%" (divisao por zero). Em contagem,
         # base pequena tambem vira vazio: 1 contra 0,01 dava "+14000%", que parecia tendencia.
         piso = MIN_BASE_COMPARACAO if self.formato == dp.FMT_INT else 0
@@ -321,15 +326,15 @@ def comparacao_ab(titulo, flt, etapas, maturacao=None):
         de, ate = flt.periodo(p)  # desloca inicio e fim juntos: A e B seguem com o mesmo numero de dias
         return flt.soma(etapa, f"({de}-{maturacao})", f"({ate}-{maturacao})")
     if maturacao:
-        titulo = f"{titulo}, so leads abordados ha {maturacao}+ dias"
+        titulo = f"{titulo} (so contatos de {maturacao}+ dias, para dar tempo de responder)"
     topo_a, topo_b = soma(etapas[0][1], "A"), soma(etapas[0][1], "B")
     linhas = []
     for nome, etapa in etapas:
         a, b = soma(etapa, "A"), soma(etapa, "B")
         linhas.append([nome, F(a), F(f"IFERROR({a}/{topo_a};0)"), F(b), F(f"IFERROR({b}/{topo_b};0)"),
                        F(f'IF({b}<{MIN_BASE_COMPARACAO};"";IFERROR({a}/{b}-1;""))')])
-    return dp.Tabela(f"{titulo} (A sobre B fica vazio quando B tem menos de {MIN_BASE_COMPARACAO})",
-                     ["Etapa", "A", "% do topo A", "B", "% do topo B", "A sobre B"], linhas,
+    return dp.Tabela(titulo, ["Etapa", "Periodo A", "% do topo", "Periodo B", "% do topo",
+                              f"Variacao (vazio se B < {MIN_BASE_COMPARACAO})"], linhas,
                      formatos=[None, dp.FMT_INT, dp.FMT_PCT, dp.FMT_INT, dp.FMT_PCT, dp.FMT_PCT])
 
 

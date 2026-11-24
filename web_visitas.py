@@ -44,7 +44,7 @@ PRODUTOS = {
 }
 
 CANAIS = ["Google organico", "Direto", "Redes sociais", "Anuncio", "E-mail", "IA", "Outros"]
-TIPOS = ["Marca ou nome", "Generica", OCULTA := "Busca oculta"]
+TIPOS = ["Marca ou nome", "Generica", "Outras", OCULTA := "Busca rara (o Google nao mostra)"]
 
 
 def canal(origem, midia):
@@ -69,7 +69,7 @@ def tipo_busca(consulta, marca):
     q = consulta.lower()
     if any(t in q for t in marca):
         return "Marca ou nome"
-    return "Generica" if any(t in q for t in GENERICAS) else "Marca ou nome"
+    return "Generica" if any(t in q for t in GENERICAS) else "Outras"
 
 
 def bases(slug):
@@ -218,18 +218,17 @@ def blocos(p, ctl, slug, dados):
         return flt.soma_p(etapa, "A"), flt.soma_p(etapa, "B")
 
     if dados["ga"]:
-        p.linha(fl.CartaoVivo("Sessoes no site", *ab(v, "sessoes")),
-                fl.CartaoVivo("Novos usuarios", *ab(v, "novos")),
-                fl.CartaoVivo("Sessoes engajadas", v.taxa("engajadas", "A"), v.taxa("engajadas", "B"), dp.FMT_PCT))
+        p.linha(fl.CartaoVivo("Visitas medidas pelo Google", *ab(v, "sessoes")),
+                fl.CartaoVivo("Visitantes novos", *ab(v, "novos")),
+                fl.CartaoVivo("Visitas com interacao", v.taxa("engajadas", "A"), v.taxa("engajadas", "B"), dp.FMT_PCT))
         canais = [c for c in CANAIS if any(c == x for _, x, _ in dados["ga"])]
         p.linha(fl.evolucao("Visitas por origem no periodo A", v, "sessoes", "origem", canais,
-                            subtitulo="Sessoes por dia ou semana, empilhadas por canal (GA4)" + aviso))
-        p.linha(fl.por_dimensao("De onde vem a visita (periodo A)", v, "origem", canais, [
-                    ("Sessoes", "soma", "sessoes"), ("Novos", "soma", "novos"),
-                    ("Engajadas", "taxa", "engajadas"), ("Compras (GA4)", "soma", "compras")],
-                    gradiente=[1], cabecalho_dim="Origem"))
-    else:
-        p.linha(dp.Tabela("Visitas no site (GA4)", ["Aviso"], [["Sem dado do GA4 nesta rodada"]]))
+                            subtitulo="Visitas por dia ou semana, empilhadas por canal (Google Analytics)" + aviso))
+        colunas = [("Visitas", "soma", "sessoes"), ("Novos", "soma", "novos"), ("Com interacao", "taxa", "engajadas")]
+        if any(m[3] for _, _, m in dados["ga"] if len(m) > 3):  # coluna de compras so quando houver compra
+            colunas.append(("Compras", "soma", "compras"))
+        p.linha(fl.por_dimensao("De onde vem a visita (periodo A)", v, "origem", canais, colunas,
+                                gradiente=[1], cabecalho_dim="Origem"))
 
     if dados["gsc"]:
         imp, cli = ab(b, "impressoes"), ab(b, "cliques")
@@ -238,18 +237,15 @@ def blocos(p, ctl, slug, dados):
         vis = [f'({b.soma_p("impressoes", x, tipo=False)}-{b.soma_p("impressoes", x, tipo=OCULTA)})' for x in "AB"]
         p.linha(fl.CartaoVivo("Aparicoes no Google", *imp),
                 fl.CartaoVivo("Cliques vindos do Google", *cli),
-                fl.CartaoVivo("Posicao media", *pos, FMT_POS),
-                fl.CartaoVivo("Busca generica (das visiveis)", *[f"IFERROR({g}/{t};0)" for g, t in zip(ger, vis)],
+                fl.CartaoVivo("Posicao media no Google (menor e melhor)", pos[0], None, FMT_POS),
+                fl.CartaoVivo("Buscas sem o nome da marca", *[f"IFERROR({g}/{t};0)" for g, t in zip(ger, vis)],
                               dp.FMT_PCT))
         tipos = [t for t in TIPOS if any(t == x for _, x, *_ in dados["gsc"])]
         linha = [fl.evolucao("Aparicoes no Google por tipo de busca (periodo A)", b, "impressoes", "tipo", tipos,
-                             subtitulo="Generica = quem procura o servico sem saber o nome; oculta = busca rara que "
-                                       "o Google nao mostra. Search Console atrasa 2 a 3 dias")]
+                             subtitulo="Generica = quem procura o servico sem saber o nome · o Google atrasa 2 a 3 dias")]
         if dados["top"]:
             linha.append(dp.Tabela(f"Buscas que mais trazem aparicao ({DIAS_TOP} dias, sem filtro)",
                                    ["Busca", "Aparicoes", "Cliques", "Posicao", "Tipo"], dados["top"],
                                    formatos=[None, dp.FMT_INT, dp.FMT_INT, FMT_POS, None], gradiente=[1]))
         for c in linha:
             p.linha(c)
-    else:
-        p.linha(dp.Tabela("Busca no Google (Search Console)", ["Aviso"], [["Sem dado do Search Console ainda"]]))

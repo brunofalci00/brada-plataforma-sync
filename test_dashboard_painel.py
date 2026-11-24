@@ -159,3 +159,8 @@ def test_formato_velho_da_aba_de_dados_e_zerado_antes_dos_novos():
     novos = [i for i, r in enumerate(reqs) if "repeatCell" in r and r["repeatCell"]["range"]["sheetId"] == 2
              and r["repeatCell"]["fields"] == "userEnteredFormat.numberFormat"]
     assert zera and novos and zera[0] < min(novos)
+
+
+def test_tabela_nao_divide_linha_com_grafico():
+    p = dp.Painel("X", "t", "r").linha(dp.Funil("F", [("a", 2), ("b", 1)]), dp.Tabela("T", ["A", "B"], [["x", 1]]))
+    assert [len(l) for l in p.linhas] == [1, 1] and isinstance(p.linhas[1][0], dp.Tabela)

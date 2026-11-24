@@ -19,28 +19,29 @@ ABA = "Visão Geral"
 # (publico, produto, periodo, [(nome da etapa, chave do resumo)]). Os 3 publicos nao se misturam; cada
 # funil tem a propria profundidade e o proprio periodo, entao as linhas nao se comparam entre si.
 PRODUTOS = [
-    # O card do Incentivador nasce sozinho ao abrir a agenda (robo): nao e etapa; o resultado e reuniao.
-    ("Incentivador", "SDR Incentivador", "desde 01/09",
+    # Reuniao: mesma contagem do cartao "Reunioes: vindas da Brenda" (cards que chegaram a reuniao).
+    ("Incentivador", "Brenda -> incentivadores", "desde 01/09",
      [("disparados", "incentivador_disparados"), ("clicaram/responderam", "incentivador_engajaram"),
       ("reunioes", "incentivador_cards_reuniao")]),
-    ("Proponente plataforma", "SDR Aptos", "desde 14/08",
+    ("Proponente plataforma", "Brenda -> ONGs", "desde 14/08",
      [("disparados", "aptos_sdr_disparados"), ("cadastraram", "aptos_sdr_cadastros"),
       ("projetos aptos", "aptos_sdr_aptos")]),
-    ("Proponente plataforma", "Plataforma (sem migrados)", "total",
+    ("Proponente plataforma", "Plataforma, todas as origens", "total",
      [("contas novas", "plataforma_novos_cadastros"), ("com projeto apto", "plataforma_novos_aptos")]),
-    # Decisao de 23/11: o fim da elaboracao e a assinatura do AprovAI (lead_id da Brenda no utm_term).
-    # Na linha do site, o assinante nao vem necessariamente do lead: sem % na ultima etapa.
-    ("Proponente elaboracao", "SDR Elaboracao", "desde 27/08",
+    # Decisao de 23/11: o fim da elaboracao e a assinatura do AprovAI (lead_id da Brenda no utm_term),
+    # medida so desde 23/11. Na linha do site, o assinante nao vem necessariamente do lead: sem %.
+    ("Proponente elaboracao", "Brenda -> elaboracao", "desde 27/08",
      [("disparados", "elaboracao_disparados"), ("clicaram/responderam", "elaboracao_engajaram"),
-      ("assinaram o AprovAI", "elaboracao_assinantes")]),
+      ("assinaram (medido desde 23/11)", "elaboracao_assinantes")]),
     ("Proponente elaboracao", "AprovAI (site e app)", "desde 26/10",
      [("visitas", "aprovai_visitas"), ("leads", "aprovai_leads"), ("pagando hoje", "aprovai_assinantes", False)]),
-    ("Outros", "Comunidade", "total",
-     [("membros", "comunidade_membros"), ("acessaram em 30 dias", "comunidade_login_30d")]),
-    ("Outros", "Primeira Fila (site)", "desde 17/11",
-     [("visitas", "pf_jornada_visitas"), ("viram um espaco", "pf_jornada_pag_espaco"),
+    ("Comunidade", "Comunidade", "total",
+     [("membros", "comunidade_membros"), ("voltaram (30 dias)", "comunidade_voltaram_30d")]),
+    # Procura por espaco: clique contado 1 por pessoa, espaco e dia so desde 17/11.
+    ("Primeira Fila", "Procura por espacos", "desde 17/11",
+     [("cliques em espacos", "pf_cliques_30d"), ("conversas", "pf_conversas_30d"),
       ("reservas pagas", "pf_reservas_pagas")]),
-    ("Outros", "SDR Primeira Fila (produtor)", "desde 20/11",
+    ("Primeira Fila", "Prospeccao de produtores", "desde 20/11",
      [("abordados", "pf_produtor_abordados"), ("clicaram", "pf_produtor_clicaram"),
       ("cadastraram", "pf_produtor_cadastros")]),
 ]
@@ -79,7 +80,8 @@ def linha_produto(publico, produto, periodo, etapas, v):
     cels = [celula_etapa(q, e[0], qtds[i - 1] if i and (len(e) < 3 or e[2]) else None)
             for i, (e, q) in enumerate(zip(etapas, qtds))]
     meio = cels[1] if len(cels) == 3 else ""
-    return [publico, produto, periodo, cels[0], meio, cels[-1], dp.taxa(qtds[-1], qtds[0])]
+    ligado = len(etapas[-1]) < 3 or etapas[-1][2]  # ultima etapa que nao vem da primeira: sem taxa de ponta a ponta
+    return [publico, produto, periodo, cels[0], meio, cels[-1], dp.taxa(qtds[-1], qtds[0]) if ligado else ""]
 
 
 def linhas_alerta(v, r):
@@ -90,38 +92,45 @@ def linhas_alerta(v, r):
         dias = int(v(chave_dias)) if chave_dias in r else 99  # sem dado = alerta, nunca "ok"
         sete = int(v(f"brenda_{chave}_envios_7d"))
         out.append([f"Brenda: disparos para {nome}", f"{dias} dias uteis sem envio ({sete} em 7 dias)",
-                    f"mais de {LIMITE_PARADA} dias uteis sem envio", "AGIR" if dias > LIMITE_PARADA else "ok"])
+                    f"mais de {LIMITE_PARADA} dias uteis sem envio", "Agir" if dias > LIMITE_PARADA else "Em dia"])
     for nome, chave, limite, quando in ALERTAS:
         n = int(v(chave))
-        out.append([nome, dp.num_br(n), quando, "AGIR" if n > limite else "ok"])
+        out.append([nome, dp.num_br(n), quando, "Agir" if n > limite else "Em dia"])
     cliques, conversas = int(v("pf_cliques_30d")), int(v("pf_conversas_30d"))
-    out.append(["Primeira Fila: quem clica num espaco do guia e abre conversa com o anfitriao (30 dias)",
+    out.append(["Primeira Fila: quem clica num espaco do guia e abre conversa com o anfitriao (desde 17/11)",
                 f"{dp.num_br(conversas)} conversas em {dp.num_br(cliques)} cliques", "menos de 1% dos cliques",
-                "AGIR" if cliques >= 100 and conversas * 100 < cliques else "ok"])
-    return sorted(out, key=lambda l: l[-1] != "AGIR")
+                "Agir" if cliques >= 30 and conversas * 100 < cliques else "Em dia"])
+    return sorted(out, key=lambda l: l[-1] != "Agir")
+
+
+def chaves_usadas():
+    """Toda chave do resumo que a Visao Geral le (para o aviso de numero velho)."""
+    chaves = {e[1] for *_, etapas in PRODUTOS for e in etapas} | {c for _, c, *_ in ALERTAS}
+    chaves |= {f"brenda_{c}_{s}" for _, c in FRENTES_BRENDA for s in ("dias_sem_envio", "envios_7d")}
+    return chaves | {"plataforma_aptos", "comunidade_membros", "incentivador_pipeline_reuniao",
+                     "aprovai_mrr", "pf_comissao_mes", "pf_cliques_30d", "pf_conversas_30d"}
 
 
 def montar_painel(r, agora, velhas=()):
     faltando = []
     v = lambda k: valor(r, k, faltando)  # noqa: E731
     p = dp.Painel(ABA, "Ecossistema Brada · visao geral",
-                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · numeros das abas de cada produto"
-                  " · reunioes de incentivador no HubSpot · receita = MRR do AprovAI + comissao da Primeira Fila"
-                  " · disparos da Automatize em detalhe na aba Brenda"
+                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Brenda = a prospeccao automatica (Automatize)"
+                  " · receita do mes = assinaturas do AprovAI + comissao da Primeira Fila"
                   + (f" · ATENCAO: {len(velhas)} numero(s) sao da ultima rodada que funcionou" if velhas else ""))
     p.linha(dp.Cartao("Projetos aptos a captar", v("plataforma_aptos")),
             dp.Cartao("Membros da Comunidade", v("comunidade_membros")),
             dp.Cartao("Reunioes: todas as origens", v("incentivador_pipeline_reuniao")),
             dp.Cartao("Reunioes: vindas da Brenda", v("incentivador_cards_reuniao")),
             dp.Cartao("Receita do mes", v("aprovai_mrr") + v("pf_comissao_mes"), dp.FMT_BRL))
-    p.linha(dp.Tabela("Precisa de acao (AGIR primeiro)",
-                      ["O que olhar", "Agora", "Dispara quando", "Situacao"], linhas_alerta(v, r),
-                      spans=[6, 3, 2, 1]))
     linhas = [linha_produto(*prod, v) for prod in PRODUTOS]
     p.linha(dp.Tabela("Funil de cada produto (o % de cada etapa e sobre a anterior; cada linha tem o seu periodo)",
                       ["Publico", "Produto", "Periodo", "Primeira etapa", "Etapa do meio", "Ultima etapa",
-                       "Ultima / primeira"], linhas,
+                       "Do inicio ao fim"], linhas,
                       formatos=[None, None, None, None, None, None, dp.FMT_PCT], spans=[2, 2, 1, 2, 2, 2, 1]))
+    p.linha(dp.Tabela("O que fazer agora (Agir primeiro)",
+                      ["O que olhar", "Agora", "Alerta se", "Situacao"], linhas_alerta(v, r),
+                      spans=[6, 3, 2, 1]))
     return p, sorted(set(faltando))
 
 
@@ -130,7 +139,8 @@ def main():
     sh = sync.get_sheets_client().open_by_key(sync.SPREADSHEET_ID)
     svc = sync.build_sheets_service()
     resumo = dp.ler_resumo(svc, sync.SPREADSHEET_ID)
-    velhas = dp.chaves_velhas(svc, sync.SPREADSHEET_ID, agora.date())
+    usadas = chaves_usadas()
+    velhas = dp.chaves_velhas(svc, sync.SPREADSHEET_ID, agora.date(), usadas)
     if velhas:
         print(f"[AVISO] {len(velhas)} chave(s) do resumo sao de outro dia (passo falhou ou fonte fora): {velhas}")
     painel, faltando = montar_painel(resumo, agora, velhas)

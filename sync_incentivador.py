@@ -25,13 +25,13 @@ SEMANAS = 10
 BASE = fl.Base("base_incentivador", [("canal", "Canal", fl.TODOS), ("fonte", "Fonte", fl.TODAS)], [
     ("disparados", "Disparados"), ("entregues", "Entregues"), ("abriram", "Abriram"),
     ("engajaram", "Clicaram ou responderam"), ("agenda", "Foram a agenda"), ("card", "Card no HubSpot"),
-    ("reuniao", "Reuniao ou alem"), ("ganho", "Ganho")])
+    ("reuniao", "Tiveram reuniao"), ("ganho", "Ganho")])
 # A Automatize cria o card no HubSpot sozinha quando o lead abre a agenda: "card" nao e conversao,
 # entao agenda e card viram uma etapa so (a base guarda as duas colunas para conferencia).
-ETAPA_AGENDA = "Abriram a agenda (o robo cria o card)"
+ETAPA_AGENDA = "Abriram a agenda"
 FUNIL_VIVO = [("Disparados", "disparados"), ("Entregues", "entregues"), ("Abriram", "abriram"),
               ("Clicaram ou responderam", "engajaram"), (ETAPA_AGENDA, "agenda"),
-              ("Reuniao ou alem", "reuniao"), ("Ganho", "ganho")]
+              ("Tiveram reuniao", "reuniao"), ("Ganho", "ganho")]
 CANAIS = ["E-mail", "WhatsApp", "E-mail + WhatsApp"]
 
 CONSULTA_CARDS = "select lead_id, deal_id from dados.hubspot_cards where deal_id is not null"
@@ -74,14 +74,14 @@ def funil(leads):
         ("Disparados", len(v)),
         ("Clicaram ou responderam", sum(l["engajou"] for l in v)),
         (ETAPA_AGENDA, sum(l["agenda"] for l in v)),
-        ("Reuniao ou alem", sum(l["reuniao"] for l in v)),
+        ("Tiveram reuniao", sum(l["reuniao"] for l in v)),
     ]
 
 
 DIAS_PARADO = 7  # card em aberto ha mais que isso no mesmo estagio conta como parado
-SEM_DONO = "(sem dono)"
-CAB_EXECUTIVOS = ["Executivo", "Cards", "Em aberto", "Parados 7+ dias", "Dias parado",
-                  "Reuniao+", "Ganho", "Perdido", "% virou reuniao"]
+SEM_DONO = "Sem executivo"
+CAB_EXECUTIVOS = ["Executivo", "Agendamentos", "Em aberto", "Parados 7+ dias", "Dias parado (mediana)",
+                  "Tiveram reuniao", "Ganho", "Perdido", "% virou reuniao"]
 
 
 def _data(iso):
@@ -108,8 +108,8 @@ def por_executivo(cards, nomes, hoje):
 
 def pipeline_hubspot(hs):
     rows = hs["rows"]
-    return [["Automatize", hs["total_automatize"], sum(1 for r in rows if r[2] == "Automatize")],
-            ["Executivo Brada", hs["total_executivo"], sum(1 for r in rows if r[2] == "Executivo Brada")]]
+    return [["Agendados pela Brenda", hs["total_automatize"], sum(1 for r in rows if r[2] == "Automatize")],
+            ["Trazidos pelos executivos", hs["total_executivo"], sum(1 for r in rows if r[2] == "Executivo Brada")]]
 
 
 def montar_painel(leads, hs, agora, executivos=(), envios=None):
@@ -130,23 +130,23 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
 
     p.linha(fl.CartaoVivo("Leads disparados", *ab("disparados")),
             fl.CartaoVivo("Clicaram ou responderam", *ab("engajaram")),
-            fl.CartaoVivo("Reunioes (leads disparados no periodo)", *ab("reuniao")),
-            fl.CartaoVivo("Disparo ate reuniao", flt.taxa("reuniao", "A"), flt.taxa("reuniao", "B"), dp.FMT_PCT))
+            fl.CartaoVivo("Reunioes (contatos deste periodo)", *ab("reuniao")),
+            fl.CartaoVivo("Abriram a agenda", *ab("agenda")))
     d, e, ag, r = (flt.soma_p(k) for k in ("disparados", "engajaram", "agenda", "reuniao"))
     p.linha(fl.FunilVivo("Do disparo ao ganho (periodo A)", flt, FUNIL_VIVO, altura=360,
-                         subtitulo="% sobre os disparados · o card nasce sozinho ao abrir a agenda · reuniao = o card ja passou por reuniao"),
+                         subtitulo="% sobre os contatados · abrir a agenda nao e reuniao marcada: so conta a reuniao que aconteceu"),
             fl.RoscaViva("Onde cada lead do periodo A parou", [
                 ("Sem resposta", F(f"{d}-{e}")), ("Engajou sem agenda", F(f"{e}-{ag}")),
                 ("Agenda sem reuniao", F(f"{ag}-{r}")),
-                ("Reuniao ou alem", F(r))], altura=360))
+                ("Tiveram reuniao", F(r))], altura=360))
     if executivos:
         cards = sum(r[1] for r in executivos)
         sem_dono = next((r[1] for r in executivos if r[0] == SEM_DONO), 0)
-        p.linha(dp.Cartao("Cards da Brenda no HubSpot", cards),
+        p.linha(dp.Cartao("Agendamentos da Brenda no HubSpot", cards),
                 dp.Cartao("Sem executivo dono", sem_dono),
                 dp.Cartao(f"Em aberto parados {DIAS_PARADO}+ dias", sum(r[3] for r in executivos)),
-                dp.Cartao("Cards que chegaram a reuniao", sum(r[5] for r in executivos)))
-        p.linha(dp.Tabela("Cobranca por executivo: cards da Brenda (foto de hoje, sem filtro)", CAB_EXECUTIVOS,
+                dp.Cartao("Reunioes da Brenda (desde o inicio)", sum(r[5] for r in executivos)))
+        p.linha(dp.Tabela("Retorno de cada executivo aos agendamentos da Brenda (hoje, sem filtro)", CAB_EXECUTIVOS,
                           executivos, formatos=[None] + [dp.FMT_INT] * 7 + [dp.FMT_PCT], gradiente=[3]))
     p.linha(fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO, maturacao=fl.MATURACAO_DIAS))
     p.linha(fl.evolucao("Leads disparados no periodo A", flt, "disparados", "canal", canais,
@@ -158,7 +158,7 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None):
         ("Abriram a agenda", "soma", "agenda"), ("Reunioes", "soma", "reuniao"),
         ("Disparo ate reuniao", "taxa", "reuniao")], gradiente=[1, 5], cabecalho_dim="Fonte"))
     p.linha(dp.Serie("Pipeline Incentivador no HubSpot (foto de hoje, sem filtro)",
-                     ["Quem trabalha", "Cards no pipeline", "Reuniao ou alem"], pipeline_hubspot(hs), tipo="BAR",
+                     ["Quem trabalha", "Negocios no pipeline", "Tiveram reuniao"], pipeline_hubspot(hs), tipo="BAR",
                      subtitulo="Todo o pipeline, nao so os leads da Brenda"))
     etapas = funil(leads)
     resumo = {"incentivador_disparados": etapas[0][1], "incentivador_engajaram": etapas[1][1],

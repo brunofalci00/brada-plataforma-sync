@@ -74,8 +74,8 @@ def tabela_modelos(modelos):
         corpo.append([PUBLICOS.get(publico, publico), modelo, desde.strftime("%d/%m") if desde else "",
                       enviados, clicaram, dp.taxa(clicaram, enviados), cadastraram, descad,
                       dp.taxa(descad, enviados)])
-    return dp.Tabela("E-mail de prospeccao por copy (desde o primeiro envio, sem filtro)",
-                     ["Publico", "Copy", "Desde", "Enviados", "Clicaram", "% clique", "Cadastraram",
+    return dp.Tabela("Desempenho de cada versao do e-mail de prospeccao (desde o primeiro envio, sem filtro)",
+                     ["Publico", "Versao do e-mail", "Desde", "Enviados", "Clicaram", "% clique", "Cadastraram",
                       "Descadastraram", "% descadastro"], corpo,
                      formatos=[None, None, None, dp.FMT_INT, dp.FMT_INT, dp.FMT_PCT, dp.FMT_INT, dp.FMT_INT,
                                dp.FMT_PCT])
@@ -91,7 +91,7 @@ def blocos(painel, ctl, dados):
                  dp.Cartao("Ja abordados (hoje)", fila["abordados"]),
                  dp.Cartao("Ainda nao abordados (hoje)", fila["total"] - fila["abordados"]),
                  dp.Cartao("Com telefone (hoje)", fila["com_telefone"]))
-    painel.linha(fl.FunilVivo("Produtor SALIC (SDR): da abordagem ao cadastro (periodo A)", fp, FUNIL, altura=320,
+    painel.linha(fl.FunilVivo("Produtor: prospeccao de produtores da Rouanet, do contato ao cadastro (periodo A)", fp, FUNIL, altura=320,
                               subtitulo="Produtor na data do primeiro contato · etapas = estado de hoje · "
                                         "filtros de cidade, categoria e canal do Hunter nao valem aqui"))
     painel.linha(fl.por_dimensao("Produtor por canal (periodo A)", fp, "canal_produtor",
@@ -99,9 +99,11 @@ def blocos(painel, ctl, dados):
                      ("Abordados", "soma", "abordados"), ("Clicaram", "taxa", "clicaram"),
                      ("Cadastraram", "soma", "cadastraram"), ("Descadastraram", "taxa", "descadastraram")],
                      cabecalho_dim="Canal"))
-    painel.linha(fl.por_dimensao("Produtor por lei (periodo A)", fp, "lei", BASE.opcoes(pl, "lei") or ["sem lei"], [
-        ("Abordados", "soma", "abordados"), ("Clicaram", "taxa", "clicaram"), ("Cadastraram", "soma", "cadastraram"),
-        ("Descadastraram", "taxa", "descadastraram")], gradiente=[1], cabecalho_dim="Lei"))
+    leis = BASE.opcoes(pl, "lei") or ["sem lei"]
+    if len(leis) > 1:  # uma lei so (hoje, Rouanet) repetiria o funil
+        painel.linha(fl.por_dimensao("Produtor por lei (periodo A)", fp, "lei", leis, [
+            ("Abordados", "soma", "abordados"), ("Clicaram", "taxa", "clicaram"), ("Cadastraram", "soma", "cadastraram"),
+            ("Descadastraram", "taxa", "descadastraram")], gradiente=[1], cabecalho_dim="Lei"))
     painel.linha(tabela_modelos(dados.get("modelos_email", [])))
     total = {k: sum(l[BASE.cabecalho.index(c)] for l in pl) for k, c in BASE.etapas}
     resumo = {"pf_produtor_abordados": total["abordados"], "pf_produtor_clicaram": total["clicaram"],

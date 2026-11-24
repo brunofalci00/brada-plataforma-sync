@@ -98,6 +98,19 @@ def _texto_data(v):
     return str(v)
 
 
+def _ms_iso(texto):
+    try:
+        return int(datetime.datetime.fromisoformat(str(texto).replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+def voltou_30d(conta, agora_ms):
+    """Usou a Comunidade nos ultimos 30 dias, pelo menos 1 dia depois do cadastro."""
+    uso, criado = _ms_iso(conta.get("lastRefreshAt") or ""), int(conta.get("createdAt", 0) or 0)
+    return bool(uso) and (agora_ms - uso) <= 30 * DIA_MS and (uso - criado) >= DIA_MS
+
+
 def _taxa(parte, todo):
     return parte / todo if todo else 0
 
@@ -136,6 +149,9 @@ def calcular(dados, agora_ms):
         "tour": sum(1 for u in reais if u.get("tourStatus") == "completed"),
         "login_7d": sum(1 for a in auth if dias_desde(a, "lastLoginAt") <= 7),
         "login_30d": sum(1 for a in auth if dias_desde(a, "lastLoginAt") <= 30),
+        # lastLoginAt so muda em login explicito (o cadastro conta como login): 99% "acessaram" era so cadastro.
+        # lastRefreshAt renova com a sessao em uso; volta = uso nos ultimos 30 dias, 1+ dia depois do cadastro.
+        "voltaram_30d": sum(1 for a in auth if voltou_30d(a, agora_ms)),
         "voltaram_7d": _taxa(len(voltaram_7d), len(elegiveis_7d)),
         "primeira_acao": len(primeiras_acoes(dados)),
         "acao_evento": acoes.get("event_external_click", 0),
@@ -270,12 +286,11 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore e Auth da Comunidade + Google Analytics"
                   f" · sem as {m['equipe']} contas da equipe · mude as células claras abaixo")
     p.linha(ctl)
-    p.linha(fl.CartaoVivo("Cadastros", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
+    p.linha(fl.CartaoVivo("Cadastros no periodo", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
             fl.CartaoVivo("Perfis completos", flt.soma_p("perfis", "A"), flt.soma_p("perfis", "B")),
-            fl.CartaoVivo("Primeiras acoes (1 por membro desde 23/11)", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
+            fl.CartaoVivo("Primeiras acoes registradas no app", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
             fl.CartaoVivo("Perfis completos por cadastro", flt.taxa("perfis", "A"), flt.taxa("perfis", "B"),
                           dp.FMT_PCT))
-    p.linha(fl.comparacao_ab("Periodo A contra periodo B (cada evento na data em que aconteceu)", flt, ETAPAS_COM))
     p.linha(fl.evolucao("Cadastros no periodo A", flt, "cadastros", "perfil", perfis,
                         subtitulo="Por dia ou semana, empilhado por perfil"),
             # Quase todo evento de primeira acao chega sem perfil: empilhar por perfil mostrava
@@ -286,11 +301,11 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
                          subtitulo="Por dia ou semana · todos os perfis (o evento ainda nao traz o perfil)"))
     # Visitas ficam no bloco do GA4 (com periodo); aqui so o estado dos membros.
     p.linha(dp.Cartao("Membros (hoje)", m["membros"]),
-            dp.Cartao("Membros que acessaram em 30 dias", m["login_30d"]),
+            dp.Cartao("Voltaram nos ultimos 30 dias (1+ dia depois do cadastro)", m["voltaram_30d"]),
             dp.Cartao("Visitantes que voltaram", ga["taxa_retorno"] if ga else 0, dp.FMT_PCT))
     p.linha(dp.Serie("O que os membros ja fizeram (foto de hoje, pessoas)", ["Etapa", "Membros"], [
-                ["Cadastraram", m["membros"]], ["Concluiram o onboarding", round(m["onboarding"] * m["membros"])],
-                ["Fizeram o quiz de impacto", m["quiz"]], ["Acessaram em 30 dias", m["login_30d"]]],
+                ["Cadastraram", m["membros"]], ["Completaram o cadastro inicial", round(m["onboarding"] * m["membros"])],
+                ["Fizeram o quiz de impacto", m["quiz"]], ["Voltaram depois do cadastro (30 dias)", m["voltaram_30d"]]],
                 tipo="BAR", subtitulo="Cada barra conta pessoas · primeiras acoes sao eventos e ficam fora", altura=320),
             dp.Rosca("Perfis dos membros (foto de hoje)", [
                 ("Explorador", m["explorador"]), ("Idealizador", m["idealizador"]),
@@ -304,7 +319,7 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
                           [[nome, vistas] for vistas, nome in ga["top"]], formatos=[None, dp.FMT_INT],
                           gradiente=[1]))
     resumo = {"comunidade_membros": m["membros"], "comunidade_cadastros_mes": m["cadastros_mes"],
-              "comunidade_primeira_acao": m["primeira_acao"], "comunidade_login_30d": m["login_30d"],
+              "comunidade_primeira_acao": m["primeira_acao"], "comunidade_login_30d": m["login_30d"], "comunidade_voltaram_30d": m["voltaram_30d"],
               "comunidade_voltaram_7d": m["voltaram_7d"]}
     if ga:
         resumo.update({"comunidade_visitantes_30d": ga["ativos"], "comunidade_retorno": ga["taxa_retorno"]})
