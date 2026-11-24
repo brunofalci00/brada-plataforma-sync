@@ -286,12 +286,11 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore e Auth da Comunidade + Google Analytics"
                   f" · sem as {m['equipe']} contas da equipe · mude as células claras abaixo")
     p.linha(ctl)
-    p.linha(fl.CartaoVivo("Cadastros", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
+    p.linha(fl.CartaoVivo("Cadastros no periodo", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
             fl.CartaoVivo("Perfis completos", flt.soma_p("perfis", "A"), flt.soma_p("perfis", "B")),
-            fl.CartaoVivo("Primeiras acoes (1 por membro desde 23/11)", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
+            fl.CartaoVivo("Primeiras acoes registradas no app", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
             fl.CartaoVivo("Perfis completos por cadastro", flt.taxa("perfis", "A"), flt.taxa("perfis", "B"),
                           dp.FMT_PCT))
-    p.linha(fl.comparacao_ab("Periodo A contra periodo B (cada evento na data em que aconteceu)", flt, ETAPAS_COM))
     p.linha(fl.evolucao("Cadastros no periodo A", flt, "cadastros", "perfil", perfis,
                         subtitulo="Por dia ou semana, empilhado por perfil"),
             # Quase todo evento de primeira acao chega sem perfil: empilhar por perfil mostrava
@@ -305,7 +304,7 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
             dp.Cartao("Voltaram nos ultimos 30 dias (1+ dia depois do cadastro)", m["voltaram_30d"]),
             dp.Cartao("Visitantes que voltaram", ga["taxa_retorno"] if ga else 0, dp.FMT_PCT))
     p.linha(dp.Serie("O que os membros ja fizeram (foto de hoje, pessoas)", ["Etapa", "Membros"], [
-                ["Cadastraram", m["membros"]], ["Concluiram o onboarding", round(m["onboarding"] * m["membros"])],
+                ["Cadastraram", m["membros"]], ["Completaram o cadastro inicial", round(m["onboarding"] * m["membros"])],
                 ["Fizeram o quiz de impacto", m["quiz"]], ["Voltaram depois do cadastro (30 dias)", m["voltaram_30d"]]],
                 tipo="BAR", subtitulo="Cada barra conta pessoas · primeiras acoes sao eventos e ficam fora", altura=320),
             dp.Rosca("Perfis dos membros (foto de hoje)", [

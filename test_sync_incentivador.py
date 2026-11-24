@@ -43,7 +43,7 @@ def test_base_um_lead_por_linha_cumulativa_com_ganho():
 def test_pipeline_hubspot_conta_reuniao_por_quem_trabalha():
     hs = {"total_automatize": 123, "total_executivo": 656,
           "rows": [["1", "x", "Automatize"], ["2", "y", "Executivo Brada"], ["3", "z", "Executivo Brada"]]}
-    assert si.pipeline_hubspot(hs) == [["Automatize", 123, 1], ["Executivo Brada", 656, 2]]
+    assert si.pipeline_hubspot(hs) == [["Agendados pela Brenda", 123, 1], ["Trazidos pelos executivos", 656, 2]]
 
 
 def test_painel_e_resumo():
@@ -80,7 +80,7 @@ def test_painel_com_executivos_mostra_tabela_de_cobranca():
     execs = [["Ana", 3, 1, 0, 2, 1, 0, 1, 1 / 3], [si.SEM_DONO, 1, 1, 1, 15, 0, 0, 0, 0.0]]
     painel, _, _ = si.montar_painel({}, hs, datetime.datetime(2026, 11, 16, 9), execs)
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
-    assert any(t.startswith("Cobranca por executivo") for t in titulos)
+    assert any(t.startswith("Retorno de cada executivo") for t in titulos)
     assert "Sem executivo dono" in titulos
-    assert "Cards que chegaram a reuniao" in titulos and "Card ate reuniao" not in titulos
+    assert "Reunioes da Brenda (desde o inicio)" in titulos and "Card ate reuniao" not in titulos
     assert not any(t.startswith("A Brenda esta disparando") for t in titulos)  # alerta mora na Brenda e na Visao Geral

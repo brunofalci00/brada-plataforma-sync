@@ -226,7 +226,7 @@ def leads_que_assinaram(docs):
 def assinantes_por_origem(docs):
     """[(utm_source, assinaturas reais)] — origem gravada pelo site desde 23/11."""
     def legivel(o):
-        return f"link vindo de {o[4:]}" if o.startswith("ref:") else (o or "sem origem")
+        return f"link vindo de {o[4:]}" if o.startswith("ref:") else (o or "Antes do rastreio (ate 23/11)")
     cont = Counter(legivel(_utm(d, "utm_source")) for d in docs if _assinatura_real(d))
     return sorted(cont.items(), key=lambda x: (-x[1], x[0]))
 
@@ -382,24 +382,23 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
             dp.Cartao("Receita recorrente (MRR, Asaas, hoje)", resumo["mrr_real"], dp.FMT_BRL),
             fl.CartaoVivo("Site: visitas a pagina", fs.soma_p("visitas", "A"), fs.soma_p("visitas", "B")),
             fl.CartaoVivo("Site: leads", fs.soma_p("leads", "A"), fs.soma_p("leads", "B")))
-    p.linha(dp.Funil("Quem e assinante de verdade (foto de hoje, sem filtro)", [
-                ("Marcados como ativos no app", pre_approvals["total_ativos_no_app"]),
-                ("Com assinatura registrada", pre_approvals["com_billing_asaas_real"]),
-                ("Pagando no Asaas", resumo["assinantes_reais_ativos"])],
+    p.linha(dp.Funil("Assinantes: quantos pagam de fato (hoje, sem equipe e teste)", [
+                ("Liberados no app", pre_approvals["total_ativos_no_app"]),
+                ("Com plano contratado", pre_approvals["com_billing_asaas_real"]),
+                ("Pagando (Asaas)", resumo["assinantes_reais_ativos"])],
                 subtitulo=f"So a ultima barra e receita · {pre_approvals['migrados_kiwify_sem_billing_asaas']} "
-                          "ativos vieram do Kiwify sem cobranca"),
-            dp.Rosca("Cobrancas do AprovAI no Asaas (foto de hoje)", cobrancas_por_situacao(asaas_rows),
-                     subtitulo="Sem testes da equipe"))
+                          "liberados vieram da plataforma antiga, sem cobranca"),
+            dp.Tabela("Cobrancas no Asaas hoje (sem equipe)", ["Situacao", "Cobrancas"],
+                      [[s, n] for s, n in cobrancas_por_situacao(asaas_rows)], formatos=[None, dp.FMT_INT]))
     brenda = sum(l.get("assinou", False) for l in (leads_elab or {}).values())
-    p.linha(dp.Tabela("De onde vieram os assinantes (foto de hoje)", ["Origem gravada no cadastro", "Assinantes"],
+    p.linha(dp.Tabela("Planos contratados no app, por origem (hoje)", ["Origem gravada no cadastro", "Planos"],
                       [[o, n] for o, n in pre_approvals.get("origens", [])]
-                      + [["Dos quais vieram de um disparo da Brenda", brenda]],
+                      + [["Dos quais vieram de um disparo da Brenda (medido desde 23/11)", brenda]],
                       formatos=[None, dp.FMT_INT], spans=[9, 3]))
     aviso_site = ("Contagem do proprio site (cada pagina vista) · o Google Analytics, mais abaixo, conta sessoes"
                   " desde 16/11, por isso da numero menor")
     p.linha(fl.FunilVivo("Site do AprovAI (periodo A)", fs, FUNIL_SITE, altura=340, subtitulo=aviso_site),
             _visitas_vivas(fs))
-    p.linha(fl.comparacao_ab("Site: periodo A contra periodo B", fs, FUNIL_SITE))
     elab = funil_elaboracao(leads_elab) if leads_elab is not None else None
     resumo_kpi = {"aprovai_visitas": app[0][1], "aprovai_leads": app[2][1],
                   "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],

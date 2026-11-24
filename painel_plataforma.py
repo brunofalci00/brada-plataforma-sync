@@ -126,6 +126,13 @@ def _controles(hoje, sdr_linhas, contas_linhas):
         fl.campo_lista("origem", "Origem da conta", BASE_CONTAS.opcoes(contas_linhas, "origem"), span=2)]), canais
 
 
+PAGINAS = {"/": "Pagina inicial", "/login": "Entrar", "/ong": "Area da ONG", "/ong/projects": "Projetos da ONG"}
+
+
+def nome_pagina(caminho):
+    return PAGINAS.get(caminho, caminho)
+
+
 def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=(), project_records=()):
     """Filtros no topo; Brenda (disparo ao projeto apto) e todas as origens (conta ao projeto apto),
     vivos pelo periodo; depois a foto de hoje (estoque, prazo, acesso, site), sem filtro."""
@@ -137,10 +144,10 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
     ctl, canais = _controles(hoje, sdr_linhas, contas_linhas)
     fsdr, fcontas = fl.Filtros(ctl, BASE_SDR), fl.Filtros(ctl, BASE_CONTAS)
     p = dp.Painel(ABA, "Plataforma Brada · da Brenda e de todas as origens ao projeto apto",
-                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore da plataforma + banco do SDR Brada · "
-                  "mude as células claras abaixo")
+                  f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · dados da plataforma e da Brenda (prospeccao"
+                  " automatica) · mude as células claras abaixo")
     p.linha(ctl)
-    p.linha(fl.CartaoVivo("Brenda: leads disparados", fsdr.soma_p("disparados", "A"), fsdr.soma_p("disparados", "B")),
+    p.linha(fl.CartaoVivo("Brenda: ONGs contatadas", fsdr.soma_p("disparados", "A"), fsdr.soma_p("disparados", "B")),
             fl.CartaoVivo("Brenda: cadastros", fsdr.soma_p("cadastro", "A"), fsdr.soma_p("cadastro", "B")),
             fl.CartaoVivo("Contas novas (todas as origens)", fcontas.soma_p("contas", "A"),
                           fcontas.soma_p("contas", "B")),
@@ -158,10 +165,11 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
     p.linha(fl.por_dimensao("Brenda por fonte do lead (periodo A)", fsdr, "fonte",
                             BASE_SDR.opcoes(sdr_linhas, "fonte", desde=recentes), [
                                 ("Disparados", "soma", "disparados"), ("Abertura", "taxa", "abriram"),
-                                ("Engajamento", "taxa", "engajaram"), ("Cadastros", "soma", "cadastro"),
-                                ("Taxa cadastro", "taxa", "cadastro"), ("Aptos", "soma", "apto")],
+                                ("Clicaram ou responderam (%)", "taxa", "engajaram"), ("Cadastros", "soma", "cadastro"),
+                                ("Cadastro (%)", "taxa", "cadastro"), ("Aptos", "soma", "apto")],
                             gradiente=[1, 5], cabecalho_dim="Fonte"))
-    p.linha(fl.por_dimensao("Contas novas por origem (periodo A)", fcontas, "origem", origens, [
+    p.linha(fl.por_dimensao("Contas novas por origem que a ONG marcou (periodo A) · Automatize = qualquer link "
+                            "deles, nao so quem a Brenda contatou", fcontas, "origem", origens, [
         ("Contas", "soma", "contas"), ("Criaram projeto", "taxa", "criaram"), ("Publicaram", "taxa", "publicaram"),
         ("Aptos", "soma", "aptos"), ("Conta ate apto", "taxa", "aptos")], gradiente=[1, 5], cabecalho_dim="Origem"))
 
@@ -180,19 +188,17 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                 ["Ate 30 dias", m["vence_30d"]], ["31 a 60 dias", m["vence_60d"] - m["vence_30d"]],
                 ["61 a 90 dias", m["vence_90d"] - m["vence_60d"]], ["91 a 180 dias", m["vence_180d"] - m["vence_90d"]],
                 ["Mais de 180 dias", max(m["proj_ativos"] - m["vence_180d"], 0)]],
-                subtitulo=f"{m.get('vence_3112', 0)} vencem em 31/12: prazo anual do DOU, a ONG renova, nao e evasao"))
+                subtitulo=f"{m.get('vence_3112', 0)} vencem em 31/12: e o prazo anual do Diario Oficial; a ONG renova, nao e desistencia"))
     if m.get("st_rascunho"):
         p.linha(dp.Serie(f"O que falta nos {m['st_rascunho']} rascunhos (foto de hoje)", ["Situacao", "Rascunhos"], [
             ["Faltam ate 3 campos (perto de publicar)", m.get("rasc_perto", 0)],
             ["Sem o arquivo do Diario Oficial", m.get("rasc_sem_diario", 0)],
             ["Sem descricao", m.get("rasc_sem_descricao", 0)],
             ["Sem orcamento estimado", m.get("rasc_sem_orcamento", 0)]], tipo="BAR",
-            subtitulo="Um rascunho pode faltar mais de um item · os perto de publicar sao a fila da regua de e-mail"))
-    p.linha(dp.Serie("Aptos a captar e usuarios ativos", ["Dia", "Aptos a captar", "Ativos em 30 dias"],
-                     _tendencia(tendencia_rows), tipo="LINE", rotulos=False, subtitulo="Ultimos 60 dias"))
+            subtitulo="Um rascunho pode ter mais de uma pendencia · os perto de publicar recebem e-mail de lembrete"))
     if ga:
         p.linha(dp.Tabela("Paginas mais vistas no site (30 dias)", ["Pagina", "Visualizacoes"],
-                          [[nome, vistas] for vistas, nome in ga["top"]], formatos=[None, dp.FMT_INT],
+                          [[nome_pagina(nome), vistas] for vistas, nome in ga["top"]], formatos=[None, dp.FMT_INT],
                           gradiente=[1]))
 
     resumo = {"plataforma_aptos": m["proj_ativos"], "plataforma_cadastros_mes": m["novos_mes"],

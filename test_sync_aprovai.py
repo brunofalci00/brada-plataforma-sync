@@ -125,7 +125,7 @@ def test_lead_da_brenda_assina_pelo_utm_term_da_assinatura_ativa():
             {"subscriptionStatus": "canceled", "utm_term": "lead-4"},
             {"subscriptionStatus": "active"}]
     assert leads_que_assinaram(docs) == frozenset({"lead-1", "lead-2"})
-    assert dict(assinantes_por_origem(docs)) == {"email": 1, "whatsapp": 1, "sem origem": 1}
+    assert dict(assinantes_por_origem(docs)) == {"email": 1, "whatsapp": 1, "Antes do rastreio (ate 23/11)": 1}
 
 
 def test_cobrancas_por_situacao_ignora_teste_e_agrupa_status():
@@ -210,7 +210,7 @@ def test_aba_abre_pelo_asaas_e_nao_mostra_a_brenda():
     assert cartoes[:2] == ["Assinantes pagando (Asaas, hoje)", "Receita recorrente (MRR, Asaas, hoje)"]
     assert painel.linhas[1][1].valor == 89.0
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
-    assert titulos.index("Quem e assinante de verdade (foto de hoje, sem filtro)") < titulos.index("Site do AprovAI (periodo A)")
+    assert titulos.index("Assinantes: quantos pagam de fato (hoje, sem equipe e teste)") < titulos.index("Site do AprovAI (periodo A)")
     assert not [t for t in titulos if "Brenda" in t]
     assert kpis["aprovai_mrr"] == 89.0
 
