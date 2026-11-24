@@ -14,7 +14,7 @@ def _resumo():
         "aptos_sdr_disparados": 1986, "aptos_sdr_cadastros": 59, "aptos_sdr_aptos": 17,
         "plataforma_novos_cadastros": 156, "plataforma_novos_aptos": 57,
         "comunidade_visitantes_30d": 480, "comunidade_login_30d": 120, "comunidade_voltaram_30d": 31, "comunidade_primeira_acao": 84,
-        "aprovai_visitas": 130, "aprovai_leads": 1, "pf_cliques_total": 882, "pf_jornada_visitas": 21,
+        "aprovai_visitas": 130, "aprovai_leads": 1, "aprovai_checkout": 4, "aprovai_compras": 2, "pf_cliques_total": 882, "pf_jornada_visitas": 21,
         "pf_jornada_pag_espaco": 10, "pf_pedidos": 0, "pf_reservas_pagas": 0,
         "pf_produtor_abordados": 59, "pf_cliques_30d": 813, "pf_conversas_30d": 0,
         "incentivador_cards_parados": 119, "incentivador_cards_sem_dono": 55, "plataforma_a_reativar": 49,
@@ -76,7 +76,7 @@ def test_chave_ausente_vira_zero_e_e_reportada():
     painel, faltando = vg.montar_painel(resumo, AGORA)
     assert faltando == ["aprovai_visitas"]
     linha = next(l for l in _componente(painel, "Funil de cada produto").linhas if l[1] == "AprovAI (site e app)")
-    assert linha[3] == "0 visitas" and linha[6] == ""  # assinante nao vem da visita: sem taxa
+    assert linha[3] == "0 visitas"
 
 
 def test_foto_da_capacidade_e_da_fila_vai_para_a_aba_brenda():
@@ -89,10 +89,10 @@ def test_foto_da_capacidade_e_da_fila_vai_para_a_aba_brenda():
     assert "Capacidade da Brenda por semana (foto de hoje, sem filtro)" in titulos
 
 
-def test_assinante_do_aprovai_sem_percentual_sobre_lead():
+def test_aprovai_mede_compra_sobre_quem_foi_ao_checkout():
     painel, _ = vg.montar_painel(_resumo(), AGORA)
     linha = next(l for l in _componente(painel, "Funil de cada produto").linhas if l[1] == "AprovAI (site e app)")
-    assert linha[5] == "0 pagando hoje"
+    assert linha[4] == "4 foram ao checkout (3,1%)" and linha[5] == "2 compraram (50%)"
 
 
 def test_frente_da_brenda_sem_dado_vira_alerta():

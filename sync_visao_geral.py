@@ -34,7 +34,7 @@ PRODUTOS = [
      [("disparados", "elaboracao_disparados"), ("clicaram/responderam", "elaboracao_engajaram"),
       ("assinaram (desde 23/11)", "elaboracao_assinantes")]),
     ("Proponente elaboracao", "AprovAI (site e app)", "desde 26/10",
-     [("visitas", "aprovai_visitas"), ("leads", "aprovai_leads"), ("pagando hoje", "aprovai_assinantes", False)]),
+     [("visitas", "aprovai_visitas"), ("foram ao checkout", "aprovai_checkout"), ("compraram", "aprovai_compras")]),
     ("Comunidade", "Comunidade", "total",
      [("membros", "comunidade_membros"), ("voltaram (30 dias)", "comunidade_voltaram_30d")]),
     # Procura por espaco: clique contado 1 por pessoa, espaco e dia so desde 17/11.
