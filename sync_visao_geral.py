@@ -32,7 +32,7 @@ PRODUTOS = [
     # medida so desde 23/11. Na linha do site, o assinante nao vem necessariamente do lead: sem %.
     ("Proponente elaboracao", "Brenda -> elaboracao", "desde 27/08",
      [("disparados", "elaboracao_disparados"), ("clicaram/responderam", "elaboracao_engajaram"),
-      ("assinaram (medido desde 23/11)", "elaboracao_assinantes")]),
+      ("assinaram (desde 23/11)", "elaboracao_assinantes")]),
     ("Proponente elaboracao", "AprovAI (site e app)", "desde 26/10",
      [("visitas", "aprovai_visitas"), ("leads", "aprovai_leads"), ("pagando hoje", "aprovai_assinantes", False)]),
     ("Comunidade", "Comunidade", "total",
@@ -66,9 +66,27 @@ def valor(r, chave, faltando):
     return dp._numero(r[chave])
 
 
+PARADA_SINGULAR = {"com", "em", "desde", "hoje", "ou", "na", "no", "do", "da"}
+
+
+def singular(nome):
+    """'reunioes' -> 'reuniao', 'clicaram/responderam' -> 'clicou/respondeu': para '1 reuniao', nao '1 reunioes'.
+    Muda so as palavras do comeco, ate a primeira preposicao ou parentese."""
+    def palavra(w):
+        for fim, troca in (("aram", "ou"), ("eram", "eu"), ("iram", "iu"), ("oes", "ao")):
+            if w.endswith(fim):
+                return w[:-len(fim)] + troca
+        return w[:-1] if w.endswith("s") and len(w) > 3 else w
+    saida, parou = [], False
+    for w in nome.split(" "):
+        parou = parou or w in PARADA_SINGULAR or w.startswith("(")
+        saida.append(w if parou else "/".join(palavra(p) for p in w.split("/")))
+    return " ".join(saida)
+
+
 def celula_etapa(qtd, nome, anterior=None):
     """'222 clicaram ou responderam (35%)': o % e sobre a etapa anterior."""
-    texto = f"{dp.num_br(qtd)} {nome}"
+    texto = f"{dp.num_br(qtd)} {singular(nome) if qtd == 1 else nome}"
     if anterior is None:
         return texto
     return f"{texto} ({dp.pct_br(dp.taxa(qtd, anterior))})"
@@ -91,14 +109,14 @@ def linhas_alerta(v, r):
         chave_dias = f"brenda_{chave}_dias_sem_envio"
         dias = int(v(chave_dias)) if chave_dias in r else 99  # sem dado = alerta, nunca "ok"
         sete = int(v(f"brenda_{chave}_envios_7d"))
-        out.append([f"Brenda: disparos para {nome}", f"{dias} dias uteis sem envio ({sete} em 7 dias)",
+        out.append([f"Brenda: disparos para {nome}", f"{dias} {'dia util' if dias == 1 else 'dias uteis'} sem envio ({sete} em 7 dias)",
                     f"mais de {LIMITE_PARADA} dias uteis sem envio", "Agir" if dias > LIMITE_PARADA else "Em dia"])
     for nome, chave, limite, quando in ALERTAS:
         n = int(v(chave))
         out.append([nome, dp.num_br(n), quando, "Agir" if n > limite else "Em dia"])
     cliques, conversas = int(v("pf_cliques_30d")), int(v("pf_conversas_30d"))
     out.append(["Primeira Fila: quem clica num espaco do guia e abre conversa com o anfitriao (desde 17/11)",
-                f"{dp.num_br(conversas)} conversas em {dp.num_br(cliques)} cliques", "menos de 1% dos cliques",
+                f"{dp.num_br(conversas)} {'conversa' if conversas == 1 else 'conversas'} em {dp.num_br(cliques)} cliques", "menos de 1% dos cliques",
                 "Agir" if cliques >= 30 and conversas * 100 < cliques else "Em dia"])
     return sorted(out, key=lambda l: l[-1] != "Agir")
 

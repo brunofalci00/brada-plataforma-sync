@@ -165,7 +165,7 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
     p.linha(fl.por_dimensao("Brenda por fonte do lead (periodo A)", fsdr, "fonte",
                             BASE_SDR.opcoes(sdr_linhas, "fonte", desde=recentes), [
                                 ("Disparados", "soma", "disparados"), ("Abertura", "taxa", "abriram"),
-                                ("Clique/resposta (%)", "taxa", "engajaram"), ("Cadastros", "soma", "cadastro"),
+                                ("Clique (%)", "taxa", "engajaram"), ("Cadastros", "soma", "cadastro"),
                                 ("Cadastro (%)", "taxa", "cadastro"), ("Aptos", "soma", "apto")],
                             gradiente=[1, 5], cabecalho_dim="Fonte"))
     p.linha(fl.por_dimensao("Contas novas por origem que a ONG marcou (periodo A) · Automatize = qualquer link "

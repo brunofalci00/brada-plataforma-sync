@@ -14,6 +14,7 @@ Pegadinhas do Sheets cobertas aqui (todas silenciosas):
 """
 
 import math
+import re
 import unicodedata
 
 LARGURA_COL = 100
@@ -49,6 +50,51 @@ class Formula(str):
     """Formula montada pelo codigo (nunca texto vindo de fonte externa): vai como formulaValue.
 
     Planilha pt-BR: argumentos com ';', numero decimal com ','; o padrao do TEXT() e en-US."""
+
+
+# ---------- acentos na tela ----------
+# O codigo escreve sem acento (chaves, filtros e testes); so o texto que vai para a tela ganha acento.
+# Nao passa por aqui: valores dos filtros (Controles) e as abas de base, que as formulas comparam.
+_ACENTOS = {
+    "ja": "já", "ate": "até", "nao": "não", "so": "só", "sao": "são", "ha": "há", "mes": "mês", "tres": "três",
+    "alem": "além", "apos": "após", "tambem": "também", "voce": "você", "entao": "então", "area": "área",
+    "periodo": "período", "numero": "número", "pagina": "página", "paginas": "páginas", "media": "média",
+    "ultimo": "último", "ultima": "última", "ultimos": "últimos", "ultimas": "últimas", "proximo": "próximo",
+    "unico": "único", "unica": "única", "publico": "público", "publicos": "públicos", "maximo": "máximo",
+    "historico": "histórico", "historica": "histórica", "historicas": "históricas", "automatico": "automático",
+    "automatica": "automática", "basico": "básico", "fisica": "física", "tecnico": "técnico", "indice": "índice",
+    "inicio": "início", "conteudo": "conteúdo", "usuario": "usuário", "usuarios": "usuários", "titulo": "título",
+    "codigo": "código", "analise": "análise", "negocio": "negócio", "negocios": "negócios", "orcamento": "orçamento",
+    "servico": "serviço", "diario": "diário", "metrica": "métrica", "metricas": "métricas", "grafico": "gráfico",
+    "graficos": "gráficos", "espaco": "espaço", "espacos": "espaços", "valido": "válido", "validos": "válidos",
+    "invalido": "inválido", "uteis": "úteis", "util": "útil", "facil": "fácil", "invalidos": "inválidos", "rapido": "rápido", "comercio": "comércio",
+}
+_PALAVRA = re.compile(r"(?<![\w@/.])[A-Za-z]+(?![\w@/])")
+
+
+def _acento_palavra(m):
+    w = m.group(0)
+    if not (w.islower() or w.isupper() or (w[0].isupper() and w[1:].islower())) or len(w) < 2:
+        return w
+    low = w.lower()
+    novo = _ACENTOS.get(low)
+    if novo is None and len(low) > 3:
+        for fim, troca in (("coes", "ções"), ("cao", "ção"), ("oes", "ões"), ("ao", "ão")):
+            if low.endswith(fim):
+                novo = low[:-len(fim)] + troca
+                break
+    if novo is None:
+        return w
+    if w.isupper():
+        return novo.upper()
+    return novo[0].upper() + novo[1:] if w[0].isupper() else novo
+
+
+def acentuar(texto):
+    """Texto de tela com acento: 'Conversao final' -> 'Conversão final'. Formula e nao-texto passam intactos."""
+    if not isinstance(texto, str) or isinstance(texto, Formula):
+        return texto
+    return _PALAVRA.sub(_acento_palavra, texto)
 
 
 def cor(rgb):
@@ -100,10 +146,10 @@ def _titulo_fmt():
 
 
 def _spec_base(titulo, subtitulo=None):
-    spec = {"title": titulo, "titleTextFormat": _titulo_fmt(), "fontName": FONTE,
+    spec = {"title": acentuar(titulo), "titleTextFormat": _titulo_fmt(), "fontName": FONTE,
             "backgroundColorStyle": cor(BRANCO)}
     if subtitulo:
-        spec["subtitle"] = subtitulo
+        spec["subtitle"] = acentuar(subtitulo)
         spec["subtitleTextFormat"] = {"fontSize": 10, "foregroundColorStyle": cor(CINZA)}
     return spec
 
@@ -310,7 +356,8 @@ class Rosca(_Componente):
         return [ctx.grafico(pos, spec)]
 
 
-def _cel(valor=None, fmt=None, bold=False, fg=CINZA_TEXTO, bg=None, size=10, alinhar=None, wrap=False):
+def _cel(valor=None, fmt=None, bold=False, fg=CINZA_TEXTO, bg=None, size=10, alinhar=None, wrap=False,
+         literal=False):
     # Texto vai sempre como stringValue (nunca avaliado): rotulos vem de GA/HubSpot/bancos externos.
     ued = {}
     if isinstance(valor, Formula):
@@ -320,7 +367,7 @@ def _cel(valor=None, fmt=None, bold=False, fg=CINZA_TEXTO, bg=None, size=10, ali
     elif isinstance(valor, (int, float)):
         ued["userEnteredValue"] = {"numberValue": valor}
     elif valor is not None:
-        ued["userEnteredValue"] = {"stringValue": str(valor)}
+        ued["userEnteredValue"] = {"stringValue": str(valor) if literal else acentuar(str(valor))}
     f = {"textFormat": {"bold": bold, "fontSize": size, "fontFamily": FONTE, "foregroundColorStyle": cor(fg)},
          "verticalAlignment": "MIDDLE"}
     if bg:
@@ -469,7 +516,7 @@ class Controles(_Componente):
             c = cols[campo.chave]
             rotulos[c] = _cel(campo.rotulo, fg=CINZA, size=9, bold=True)
             valores[c] = _cel(campo.valor, fmt=FMT_DATA if campo.data else None, bold=True, bg=PESSEGO,
-                              alinhar="CENTER")
+                              alinhar="CENTER", literal=True)
             for r in (lin0, lin0 + 1):
                 if campo.span > 1:
                     reqs.append({"mergeCells": {"range": {"sheetId": pid, "startRowIndex": r, "endRowIndex": r + 1,
@@ -504,7 +551,7 @@ def _valor_dados(v):
         return {"userEnteredValue": {"numberValue": v}}
     if v is None or v == "":
         return {}
-    return {"userEnteredValue": {"stringValue": str(v)}}
+    return {"userEnteredValue": {"stringValue": acentuar(str(v))}}
 
 
 ABA_RESUMO = "dados_resumo"

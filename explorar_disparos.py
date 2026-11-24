@@ -109,14 +109,19 @@ def bounce(flt, **fixos):
 
 
 MIN_ENVIOS_TAXA = 20  # abaixo disso a taxa engana (2 envios entregues = "100% de entrega")
+# O WhatsApp nao mede abertura nem devolve "e-mail invalido": a taxa sairia 100% e enganaria.
+NAO_MEDE = {("WhatsApp", "abriram"), ("WhatsApp", "voltou")}
 
 
 def taxas_vivas(flt, dimensao, valores):
     """Taxas por valor da dimensao; valor com menos de MIN_ENVIOS_TAXA envios no periodo A fica vazio."""
-    def cel(formula, v):
+    def cel(formula, v, etapa):
+        if (v, etapa) in NAO_MEDE:
+            return ""
         return F(f'IF({flt.soma_p("envios", **{dimensao: v})}<{MIN_ENVIOS_TAXA};"";{formula})')
-    linhas = [[nome] + [cel(flt.taxa(etapa, **{dimensao: v}), v) for v in valores] for nome, etapa in TAXAS]
-    return linhas + [["Voltou (e-mail invalido)"] + [cel(bounce(flt, **{dimensao: v}), v) for v in valores]]
+    linhas = [[nome] + [cel(flt.taxa(etapa, **{dimensao: v}), v, etapa) for v in valores] for nome, etapa in TAXAS]
+    return linhas + [["Voltou (e-mail invalido)"] + [cel(bounce(flt, **{dimensao: v}), v, "voltou")
+                                                     for v in valores]]
 
 
 def montar_painel(linhas_base, agora, foto=(), saude=None):
@@ -134,11 +139,12 @@ def montar_painel(linhas_base, agora, foto=(), saude=None):
     env_a, env_b = flt.soma_p("envios", "A"), flt.soma_p("envios", "B")
     p.linha(fl.CartaoVivo("Mensagens enviadas", env_a, env_b),
             fl.CartaoVivo("Envios por dia", f"{env_a}/{flt.dias('A')}", f"{env_b}/{flt.dias('B')}", dp.FMT_INT),
-            fl.CartaoVivo("Taxa de abertura", flt.taxa("abriram", "A"), flt.taxa("abriram", "B"), dp.FMT_PCT),
+            fl.CartaoVivo("Abertura dos e-mails", flt.taxa("abriram", "A", canal="E-mail"),
+                          flt.taxa("abriram", "B", canal="E-mail"), dp.FMT_PCT),
             fl.CartaoVivo("Conversao final", flt.taxa("resultado", "A"), flt.taxa("resultado", "B"), dp.FMT_PCT))
     p.linha(fl.FunilVivo("Funil do período A", flt, FUNIL,
                          "Conversao final: reuniao (Incentivador), assinatura do AprovAI (Elaboracao) ou cadastro "
-                         "(Plataforma), 1 por contato · escolha uma frente no filtro para ler um publico so"),
+                         "(Plataforma), 1 por contato · WhatsApp entregue conta como aberto · escolha uma frente no filtro"),
             fl.SerieViva("Taxas por frente no período A", ["Taxa"] + [n for _, n in FRENTES],
                          taxas_vivas(flt, "frente", [n for _, n in FRENTES]),
                          formato=dp.FMT_PCT, subtitulo="% das mensagens de cada frente · vazio = menos de 20 no periodo"))
@@ -151,7 +157,7 @@ def montar_painel(linhas_base, agora, foto=(), saude=None):
                          taxas_vivas(flt, "canal", [c for _, c in CANAIS]), formato=dp.FMT_PCT,
                          subtitulo="% das mensagens de cada canal · WhatsApp nao mede abertura nem e-mail invalido"))
     p.linha(fl.por_dimensao("Por fonte do lead no período A", flt, "fonte", com_volume,
-                            [("Envios", "soma", "envios"), ("Abertura", "taxa", "abriram"),
+                            [("Envios", "soma", "envios"), ("Abertura dos e-mails", "taxa", "abriram", {"canal": "E-mail"}),
                              ("Clique ou resposta", "taxa", "engajaram"), ("Conversao final", "soma", "resultado"),
                              ("Conversao final (%)", "taxa", "resultado")], gradiente=[1, 5], cabecalho_dim="Fonte do contato"))
     for componentes in foto:
@@ -210,7 +216,7 @@ def resumo_saude(envios, hoje):
 
 
 def tabela_saude(envios, hoje, frentes=None, fila=None,
-                 titulo=f"A Brenda esta disparando? (hoje, sem filtro · PARADA = mais de {LIMITE_PARADA} dias uteis sem envio)"):
+                 titulo=f"A Brenda está disparando? (hoje, sem filtro · PARADA = mais de {LIMITE_PARADA} dias uteis sem envio)"):
     cab = ["Frente", "Ultimo envio", "Dias uteis sem envio", "Envios em 7 dias"] + (
         ["Esperando na fila"] if fila is not None else []) + ["Situacao"]
     return dp.Tabela(titulo, cab, linhas_saude(envios, hoje, frentes, fila),
@@ -278,6 +284,33 @@ def hashes_da_aba(sh, aba):
     return frozenset(l[0] for l in linhas[1:] if l and l[0])
 
 
+def cadastros_pelo_link(sh, aba="raw_users"):
+    """lead_hash das contas da plataforma que chegaram pelo link rastreado da Brenda (utm_term = lead_id).
+
+    A Automatize so marca cadastro quando o e-mail casa; a aba Plataforma tambem casa pelo link.
+    Usar os dois aqui faz a aba Brenda contar os mesmos cadastros que a Plataforma."""
+    import gspread
+    try:
+        linhas = sh.worksheet(aba).get_all_values()
+    except gspread.exceptions.WorksheetNotFound:
+        print(f"[AVISO] {aba} ausente: cadastro da Brenda so pelo que a Automatize marcou")
+        return frozenset()
+    if not linhas or "utm_term" not in linhas[0]:
+        print(f"[AVISO] {aba} sem a coluna utm_term: cadastro da Brenda so pelo que a Automatize marcou")
+        return frozenset()
+    i = linhas[0].index("utm_term")
+    return frozenset(sdr.hash_lead(l[i].strip().lower()) for l in linhas[1:] if len(l) > i and l[i].strip())
+
+
+def marcar_resultados(envios, reunioes, assinaram, cadastrados):
+    """Junta os resultados que vem de outras abas: reuniao (HubSpot), assinatura (Asaas) e cadastro pelo link."""
+    def marcar(e):
+        h = e.get("lead_hash")
+        cadastro = e["cadastro"] or (e["modalidade"] == sdr.APTOS and h in cadastrados)
+        return dict(e, reuniao=h in reunioes, assinou=h in assinaram, cadastro=cadastro)
+    return [marcar(e) for e in envios]
+
+
 def publicar_base(sh, svc, spreadsheet_id, linhas):
     BASE.publicar(sh, svc, spreadsheet_id, linhas)
 
@@ -294,8 +327,7 @@ def main():
     sh = sync.get_sheets_client().open_by_key(sync.SPREADSHEET_ID)
     reunioes = leads_com_reuniao(sh)
     assinaram = hashes_da_aba(sh, "raw_elaboracao_assinantes")
-    envios = [dict(e, reuniao=e.get("lead_hash") in reunioes, assinou=e.get("lead_hash") in assinaram)
-              for e in envios]
+    envios = marcar_resultados(envios, reunioes, assinaram, cadastros_pelo_link(sh))
     linhas = base(envios)
     svc = sync.build_sheets_service()
     renomear_abas_antigas(sh, svc, sync.SPREADSHEET_ID)

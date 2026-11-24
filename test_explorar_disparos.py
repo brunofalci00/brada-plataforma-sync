@@ -115,3 +115,27 @@ def test_resultado_conta_uma_vez_por_lead():
     envios = [dict(_e(sdr.APTOS, D(2026, 11, d), cadastro=True), lead_hash="abc") for d in (3, 4, 5)]
     linhas = ex.base(envios)
     assert sum(l[-1] for l in linhas) == 1 and sum(l[4] for l in linhas) == 3  # 3 envios, 1 cadastro
+
+
+def test_cadastro_pelo_link_so_vale_na_frente_plataforma():
+    import explorar_disparos as ed
+    import sdr_automatize as sdr
+    base_envio = {"cadastro": False, "lead_hash": "h1"}
+    envios = [dict(base_envio, modalidade=sdr.APTOS), dict(base_envio, modalidade=sdr.INCENTIVADOR),
+              dict(base_envio, modalidade=sdr.APTOS, lead_hash="h2")]
+    marcados = ed.marcar_resultados(envios, frozenset(), frozenset(), frozenset({"h1"}))
+    assert [e["cadastro"] for e in marcados] == [True, False, False]
+
+
+def test_link_usa_o_mesmo_hash_do_lead():
+    import explorar_disparos as ed
+    import sdr_automatize as sdr
+
+    class Aba:
+        def get_all_values(self):
+            return [["user_hash", "utm_term"], ["x", " ABC-1 "], ["y", ""], ["z"]]
+
+    class Planilha:
+        def worksheet(self, _):
+            return Aba()
+    assert ed.cadastros_pelo_link(Planilha()) == frozenset({sdr.hash_lead("abc-1")})

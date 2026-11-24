@@ -164,3 +164,19 @@ def test_formato_velho_da_aba_de_dados_e_zerado_antes_dos_novos():
 def test_tabela_nao_divide_linha_com_grafico():
     p = dp.Painel("X", "t", "r").linha(dp.Funil("F", [("a", 2), ("b", 1)]), dp.Tabela("T", ["A", "B"], [["x", 1]]))
     assert [len(l) for l in p.linhas] == [1, 1] and isinstance(p.linhas[1][0], dp.Tabela)
+
+
+def test_acento_so_no_texto_de_tela():
+    import dashboard_painel as dp
+    assert dp.acentuar("Conversao final ja nao") == "Conversão final já não"
+    assert dp.acentuar("Prospeccao de espacos") == "Prospecção de espaços"
+    assert dp.acentuar("REUNIOES") == "REUNIÕES"
+    for intacto in ("elaboracao_engajaram", "dadosEmAtualizacao", "https://x.com/acao", "ao lado", "Taxa"):
+        assert dp.acentuar(intacto) == intacto
+    assert dp.acentuar(dp.Formula('=SUMIFS(A;B;"Elaboracao")')) == '=SUMIFS(A;B;"Elaboracao")'
+
+
+def test_filtro_fica_sem_acento_para_bater_com_a_base():
+    import dashboard_painel as dp
+    cel = dp._cel("Elaboracao", literal=True)
+    assert cel["userEnteredValue"]["stringValue"] == "Elaboracao"
