@@ -40,9 +40,9 @@ BASE = fl.Base(ABA_BASE,
                 ("resultado", "Resultado")])
 CABECALHO_BASE = BASE.cabecalho
 FUNIL = [("Envios", "envios"), ("Entregues", "entregues"), ("Abriram", "abriram"),
-         ("Clicaram ou responderam", "engajaram"), ("Resultado", "resultado")]
+         ("Clicaram ou responderam", "engajaram"), ("Conversao final", "resultado")]
 TAXAS = [("Entrega", "entregues"), ("Abertura", "abriram"), ("Clique ou resposta", "engajaram"),
-         ("Resposta", "responderam"), ("Resultado", "resultado")]
+         ("Resposta", "responderam"), ("Conversao final", "resultado")]
 
 
 # ---------- base (Python) ----------
@@ -116,7 +116,7 @@ def taxas_vivas(flt, dimensao, valores):
     def cel(formula, v):
         return F(f'IF({flt.soma_p("envios", **{dimensao: v})}<{MIN_ENVIOS_TAXA};"";{formula})')
     linhas = [[nome] + [cel(flt.taxa(etapa, **{dimensao: v}), v) for v in valores] for nome, etapa in TAXAS]
-    return linhas + [["Bounce"] + [cel(bounce(flt, **{dimensao: v}), v) for v in valores]]
+    return linhas + [["Voltou (e-mail invalido)"] + [cel(bounce(flt, **{dimensao: v}), v) for v in valores]]
 
 
 def montar_painel(linhas_base, agora, foto=(), saude=None):
@@ -125,37 +125,35 @@ def montar_painel(linhas_base, agora, foto=(), saude=None):
     com_volume = BASE.opcoes(linhas_base, "fonte", desde=recentes) or lista_fontes[:1] or [SEM_FONTE]
     ctl = controles(agora.date(), lista_fontes)
     flt = Filtros(ctl)
-    p = dp.Painel(ABA, "Brenda · o SDR da Automatize nas tres frentes",
+    p = dp.Painel(ABA, "Brenda · a prospeccao automatica nas tres frentes",
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · mude as células claras abaixo; "
                   f"voltam para os últimos {JANELA_PADRAO} dias a cada atualização")
     p.linha(ctl)
     if saude is not None:
         p.linha(saude)
     env_a, env_b = flt.soma_p("envios", "A"), flt.soma_p("envios", "B")
-    p.linha(fl.CartaoVivo("Envios", env_a, env_b),
+    p.linha(fl.CartaoVivo("Mensagens enviadas", env_a, env_b),
             fl.CartaoVivo("Envios por dia", f"{env_a}/{flt.dias('A')}", f"{env_b}/{flt.dias('B')}", dp.FMT_INT),
             fl.CartaoVivo("Taxa de abertura", flt.taxa("abriram", "A"), flt.taxa("abriram", "B"), dp.FMT_PCT),
-            fl.CartaoVivo("Taxa de resultado", flt.taxa("resultado", "A"), flt.taxa("resultado", "B"), dp.FMT_PCT))
+            fl.CartaoVivo("Conversao final", flt.taxa("resultado", "A"), flt.taxa("resultado", "B"), dp.FMT_PCT))
     p.linha(fl.FunilVivo("Funil do período A", flt, FUNIL,
-                         "Resultado: reuniao (Incentivador), assinatura do AprovAI (Elaboracao) ou cadastro (Plataforma)"),
-            fl.RoscaViva("Envios por frente no período A",
-                         [(n, F(flt.soma_p("envios", frente=n))) for _, n in FRENTES],
-                         subtitulo="a mesma IA dispara para as três"))
+                         "Conversao final: reuniao (Incentivador), assinatura do AprovAI (Elaboracao) ou cadastro "
+                         "(Plataforma), 1 por contato · escolha uma frente no filtro para ler um publico so"),
+            fl.SerieViva("Taxas por frente no período A", ["Taxa"] + [n for _, n in FRENTES],
+                         taxas_vivas(flt, "frente", [n for _, n in FRENTES]),
+                         formato=dp.FMT_PCT, subtitulo="% das mensagens de cada frente · vazio = menos de 20 no periodo"))
     p.linha(fl.comparacao_ab("Período A contra período B", flt, FUNIL, maturacao=fl.MATURACAO_DIAS))
     p.linha(fl.SerieViva("Envios no período A", ["Dia"] + [n for _, n in FRENTES],
                          [[F(flt.sequencia())] + [F(flt.por_ponto("envios", frente=n)) for _, n in FRENTES]],
                          n_linhas=MAX_PONTOS, formato_dominio=dp.FMT_DIA, empilhado=True, rotulos=False,
                          subtitulo="Por dia ou semana (filtro 'Agrupar por'), empilhado por frente", altura=320))
     p.linha(fl.SerieViva("Taxas por canal no período A", ["Taxa"] + [n for _, n in CANAIS],
-                         taxas_vivas(flt, "canal", [c for _, c in CANAIS]),
-                         formato=dp.FMT_PCT, subtitulo="% dos envios de cada canal · vazio = menos de 20 envios no periodo"),
-            fl.SerieViva("Taxas por frente no período A", ["Taxa"] + [n for _, n in FRENTES],
-                         taxas_vivas(flt, "frente", [n for _, n in FRENTES]),
-                         formato=dp.FMT_PCT, subtitulo="% dos envios de cada frente · vazio = menos de 20 envios no periodo"))
+                         taxas_vivas(flt, "canal", [c for _, c in CANAIS]), formato=dp.FMT_PCT,
+                         subtitulo="% das mensagens de cada canal · WhatsApp nao mede abertura nem e-mail invalido"))
     p.linha(fl.por_dimensao("Por fonte do lead no período A", flt, "fonte", com_volume,
                             [("Envios", "soma", "envios"), ("Abertura", "taxa", "abriram"),
-                             ("Clique ou resposta", "taxa", "engajaram"), ("Resultado", "soma", "resultado"),
-                             ("Taxa de resultado", "taxa", "resultado")], gradiente=[1, 5]))
+                             ("Clique ou resposta", "taxa", "engajaram"), ("Conversao final", "soma", "resultado"),
+                             ("Conversao final (%)", "taxa", "resultado")], gradiente=[1, 5], cabecalho_dim="Fonte do contato"))
     for componentes in foto:
         p.linha(*componentes)
     return p
@@ -228,8 +226,8 @@ def componentes_visao_geral(envios, fila, hoje):
         (dp.Serie("Capacidade da Brenda por semana (foto de hoje, sem filtro)", ["Semana"] + [n for _, n in FRENTES],
                   divisao_por_semana(envios, hoje), empilhado=True,
                   subtitulo=f"A mesma IA dispara para as três frentes · {nota}"),),
-        (dp.Tabela("Fila do alocador hoje (sem filtro)",
-                   ["Frente", "Envios por dia (28d)", "Enviados hoje", "Esperando na fila", "Canal da fila"],
+        (dp.Tabela("Fila de envio hoje (sem filtro)",
+                   ["Frente", "Mensagens por dia (28d)", "Enviadas hoje", "Esperando na fila", "Canal da fila"],
                    linhas_fila(envios, fila, hoje),
                    formatos=[None, {"type": "NUMBER", "pattern": "0.0"}, dp.FMT_INT, dp.FMT_INT, None],
                    gradiente=[3]),),

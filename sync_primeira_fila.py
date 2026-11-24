@@ -40,6 +40,7 @@ PERFIS_TESTE = [
     "6d936fac-3bb4-47dd-a485-c1367a8486c4",
     "c01d2718-3124-4aac-9f8e-3cdcb74527be",
     "1eb9c0d9-7467-45b7-968f-02b192433b21",
+    "9a639948-96be-48fb-b0ad-1e3c3dbef83c",  # teste criado em 19/11 com 1 espaco no guia (auditoria de 24/11)
 ]
 
 
@@ -77,10 +78,12 @@ CONSULTAS = {
         ["perfis", "plano_rede", "plano_basico", "contas_recebimento"]),
     "procura": ("""
         select (select count(*) from cliques_reais),
-               (select count(*) from cliques_reais where clicked_at >= now() - interval '30 days'),
+               (select count(*) from cliques_reais where (clicked_at at time zone 'America/Sao_Paulo')::date
+                   >= greatest((now() at time zone 'America/Sao_Paulo')::date - 29, date '2026-11-17')),
                (select count(*) from conversas_reais),
                (select count(*) from reservas_reais),
-               (select count(*) from conversas_reais where criada_em >= now() - interval '30 days')""",
+               (select count(*) from conversas_reais where (criada_em at time zone 'America/Sao_Paulo')::date
+                   >= greatest((now() at time zone 'America/Sao_Paulo')::date - 29, date '2026-11-17'))""",
         ["cliques_total", "cliques_30d", "conversas", "pedidos_reserva", "conversas_30d"]),
     "reservas": ("""
         select count(*) filter (where pagamento_status = 'pago' and status <> 'cancelada'),
@@ -142,9 +145,11 @@ CONSULTA_DEMANDA = BASE + f"""
 # Lado anfitriao da jornada: perfil criado, espaco cadastrado e espaco no guia (estado de hoje, na data do cadastro).
 CONSULTA_ANFITRIAO = BASE + f"""
     select (created_at at time zone '{TZ}')::date, null, 'perfis' from perfis_reais
-    union all select (created_at at time zone '{TZ}')::date, cidade, 'espacos' from espacos_reais
-    union all select (created_at at time zone '{TZ}')::date, cidade, 'no_guia' from espacos_reais
-      where revisao_status = 'publicado' and not coalesce(pausado, false) and not coalesce(revisao_oculto, false)"""
+    union all select (min(created_at) at time zone '{TZ}')::date, min(cidade), 'espacos' from espacos_reais
+      group by owner_id
+    union all select (min(created_at) at time zone '{TZ}')::date, min(cidade), 'no_guia' from espacos_reais
+      where revisao_status = 'publicado' and not coalesce(pausado, false) and not coalesce(revisao_oculto, false)
+      group by owner_id"""
 
 ABA = "Primeira Fila"
 BASE_HUNTER = fl.Base("base_pf_hunter", [("cidade", "Cidade", fl.TODAS), ("categoria", "Categoria", fl.TODAS),
@@ -163,11 +168,11 @@ FUNIL_DEMANDA = [("Cliques nos espacos do guia", "cliques"), ("Conversas no chat
 BASE_JORNADA = fl.Base("base_pf_jornada", [("cidade", "Cidade", fl.TODAS)], [
     ("visitas", "Visitas ao site"), ("pag_espaco", "Sessoes em pagina de espaco"),
     ("pag_cadastro", "Sessoes no criar conta"), ("perfis", "Perfis de anfitriao"),
-    ("espacos", "Espacos cadastrados"), ("no_guia", "Espacos no guia hoje"), ("cliques", "Cliques nos espacos"),
+    ("espacos", "Anfitrioes com espaco"), ("no_guia", "Anfitrioes no guia hoje"), ("cliques", "Cliques nos espacos"),
     ("conversas", "Conversas"), ("pedidos", "Pedidos de reserva"), ("pagas", "Reservas pagas")])
 JORNADA_ANFITRIAO = [("Visitas ao site", "visitas"), ("Viram pagina de espaco", "pag_espaco"),
                      ("Abriram o criar conta", "pag_cadastro"), ("Perfis de anfitriao", "perfis"),
-                     ("Espacos cadastrados", "espacos"), ("Espacos no guia hoje", "no_guia")]
+                     ("Cadastraram um espaco", "espacos"), ("Tem espaco no guia hoje", "no_guia")]
 JORNADA_PRODUTOR = [("Visitas ao site", "visitas"), ("Viram pagina de espaco", "pag_espaco"),
                     ("Conversas no chat", "conversas"),
                     ("Pedidos de reserva", "pedidos"), ("Reservas pagas", "pagas")]
@@ -314,41 +319,35 @@ def montar_painel(dados, agora, web=None):
     ctl = fl.controles(ABA, hoje, [fl.campo_lista("cidade", "Cidade", cidades, span=2),
                                    fl.campo_lista("categoria", "Categoria (Hunter)",
                                                   BASE_HUNTER.opcoes(hl, "categoria"), span=2),
-                                   fl.campo_lista("canal", "Canal (Hunter)", canais, todos=fl.TODOS)])
+                                   fl.campo_lista("canal", "Canal de prospeccao", canais, todos=fl.TODOS)])
     jl = linhas_jornada(dados.get("anfitriao_linhas", []), dados.get("demanda_linhas", []), web)
     fh, fd, fj = fl.Filtros(ctl, BASE_HUNTER), fl.Filtros(ctl, BASE_DEMANDA), fl.Filtros(ctl, BASE_JORNADA)
     painel = dp.Painel(ABA, "Primeira Fila · do espaco captado a reserva paga",
                        f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco da Primeira Fila"
-                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · custo por anfitriao entra quando a campanha da Meta rodar com UTM · mude as células claras abaixo")
+                       f" · sem os {len(PERFIS_TESTE)} perfis de teste e da equipe · clique contado 1 por pessoa, espaco"
+                       f" e dia desde {MUDANCA_CLIQUES} · mude as células claras abaixo")
     painel.linha(ctl)
     painel.linha(fl.CartaoVivo("Visitas ao site (desde 17/11)", fj.soma_p("visitas", "A"), fj.soma_p("visitas", "B")),
-                 fl.CartaoVivo(f"Cliques nos espacos do guia (contagem mudou em {MUDANCA_CLIQUES})",
-                               fd.soma_p("cliques", "A"), fd.soma_p("cliques", "B")),
-                 fl.CartaoVivo("Hunter: espacos captados", fh.soma_p("captados", "A"), fh.soma_p("captados", "B")),
+                 fl.CartaoVivo("Cliques nos espacos", fd.soma_p("cliques", "A"), fd.soma_p("cliques", "B")),
+                 fl.CartaoVivo("Espacos prospectados", fh.soma_p("captados", "A"), fh.soma_p("captados", "B")),
                  fl.CartaoVivo("Reservas pagas", fd.soma_p("pagas", "A"), fd.soma_p("pagas", "B")))
-    painel.linha(fl.FunilVivo("Quem quer anunciar (anfitriao): da pagina de espaco ao guia (periodo A)", fj,
-                              JORNADA_ANFITRIAO[1:], altura=360,
-                              subtitulo="O site nao separa os publicos nas visitas: o anfitriao comeca a se separar "
-                                        "no criar conta · desde 17/11 · Cidade = Todas"),
+    painel.linha(dp.Cartao("Espacos no ar (hoje)", e["no_ar"]), dp.Cartao("Anfitrioes (hoje)", a["perfis"]),
+                 dp.Cartao("Reservas pagas (desde o lancamento)", r["pagas"]),
+                 dp.Cartao("Valor pago (desde o lancamento)", r["valor_pago"], dp.FMT_BRL))
+    painel.linha(fl.FunilVivo("Quem quer anunciar (anfitriao): do criar conta ao guia (periodo A)", fj,
+                              JORNADA_ANFITRIAO[2:], altura=360,
+                              subtitulo="Pessoas, nao espacos · desde 17/11 · so com Cidade = Todas"),
                  fl.FunilVivo("Quem quer reservar (produtor): do clique no espaco a reserva paga (periodo A)", fd,
                               FUNIL_DEMANDA, altura=360,
                               subtitulo="Cada etapa na data em que aconteceu · so o filtro de cidade vale aqui"))
     painel.linha(fl.comparacao_ab("Reservas: periodo A contra periodo B", fd, FUNIL_DEMANDA))
-    painel.linha(fl.FunilVivo("Anfitriao: Hunter da captacao ao cadastro (periodo A)", fh, FUNIL_HUNTER, altura=360,
-                              subtitulo="Espacos na data da captacao · etapas = estado de hoje"),
+    painel.linha(fl.FunilVivo("Anfitriao: prospeccao de espacos, do contato ao cadastro (periodo A)", fh, FUNIL_HUNTER,
+                              altura=360, subtitulo="Prospeccao automatica da Automatize · espaco na data em que foi"
+                                                    " encontrado · etapas = estado de hoje"),
                  fl.evolucao("Cliques nos espacos do guia no periodo A", fd, "cliques", "cidade", cidades[:6],
                              subtitulo="Por dia ou semana, empilhado pelas 6 cidades com mais volume"))
     pl, resumo_produtor = pf_produtor.blocos(painel, ctl, dados)
-    recentes = hoje - datetime.timedelta(days=2 * fl.JANELA_PADRAO - 1)
-    painel.linha(fl.por_dimensao("Detalhe: Hunter por cidade (periodo A)", fh, "cidade",
-                                 BASE_HUNTER.opcoes(hl, "cidade", desde=recentes) or cidades[:1], [
-        ("Captados", "soma", "captados"), ("Abordados", "taxa", "abordados"), ("Responderam", "taxa", "responderam"),
-        ("Clicaram no link", "soma", "clicou"), ("Cadastraram", "soma", "cadastrou")],
-        gradiente=[1], cabecalho_dim="Cidade"))
     pf_cruzamentos.blocos(painel, fh, canais, dados.get("oferta_local", []), (web or {}).get("consultas", []))
-    painel.linha(dp.Cartao("Espacos no ar (hoje)", e["no_ar"]), dp.Cartao("Anfitrioes (hoje)", a["perfis"]),
-                 dp.Cartao("Reservas pagas (desde o lancamento)", r["pagas"]),
-                 dp.Cartao("Valor pago (desde o lancamento)", r["valor_pago"], dp.FMT_BRL))
     painel.linha(dp.Rosca("Espacos cadastrados (foto de hoje)", [
                      ("No ar", e["no_ar"]), ("Em revisao", e["em_revisao"]),
                      ("Pausados ou ocultos", e["cadastrados"] - e["no_ar"] - e["em_revisao"])]),

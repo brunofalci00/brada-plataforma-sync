@@ -148,3 +148,14 @@ def test_visitante_deslogado_nao_conta_como_primeira_acao():
         {"event": "first_relevant_action", "timestamp": "2026-11-24T10:05:00Z", "userId": "", "role": ""},
         {"event": "first_relevant_action", "timestamp": "2026-11-20T10:00:00Z"}]}
     assert len(sc.primeiras_acoes(dados)) == 1  # so o evento antigo, sem a chave userId
+
+
+def test_voltou_conta_uso_depois_do_dia_do_cadastro():
+    import datetime
+    dia = 86400000
+    agora = int(datetime.datetime(2026, 11, 24, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+    so_cadastro = {"createdAt": str(agora - 5 * dia), "lastRefreshAt": datetime.datetime.fromtimestamp(
+        (agora - 5 * dia + 3600000) / 1000, datetime.timezone.utc).isoformat()}
+    voltou = {"createdAt": str(agora - 10 * dia), "lastRefreshAt": "2026-11-23T10:00:00Z"}
+    assert not sc.voltou_30d(so_cadastro, agora) and sc.voltou_30d(voltou, agora)
+    assert not sc.voltou_30d({"createdAt": "0"}, agora)

@@ -213,3 +213,9 @@ def test_aba_abre_pelo_asaas_e_nao_mostra_a_brenda():
     assert titulos.index("Quem e assinante de verdade (foto de hoje, sem filtro)") < titulos.index("Site do AprovAI (periodo A)")
     assert not [t for t in titulos if "Brenda" in t]
     assert kpis["aprovai_mrr"] == 89.0
+
+
+def test_equipe_somosbrada_e_teste_nao_contam():
+    from sync_aprovai import is_teste_ou_staff
+    assert is_teste_ou_staff({"email": "fulano@somosbrada.com.br"}) and is_teste_ou_staff({"email": "x@teste.com"})
+    assert not is_teste_ou_staff({"email": "cliente@gmail.com"})

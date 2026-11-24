@@ -525,10 +525,11 @@ def ler_resumo(svc, spreadsheet_id):
     return {k: v for k, v, _ in _linhas_resumo(svc, spreadsheet_id)}
 
 
-def chaves_velhas(svc, spreadsheet_id, hoje):
-    """Chaves do resumo gravadas antes de hoje (passo que falhou ou fonte fora): o numero e de outro dia."""
+def chaves_velhas(svc, spreadsheet_id, hoje, usadas=None):
+    """Chaves do resumo gravadas antes de hoje (passo que falhou ou fonte fora): o numero e de outro dia.
+    `usadas`: so essas contam (chave antiga que ninguem mais grava nem le nao e aviso)."""
     return sorted(k for k, _, quando in _linhas_resumo(svc, spreadsheet_id)
-                  if str(quando)[:10] < hoje.isoformat())
+                  if str(quando)[:10] < hoje.isoformat() and (usadas is None or k in usadas))
 
 
 def gravar_resumo(sh, svc, spreadsheet_id, valores, agora):

@@ -60,7 +60,7 @@ def test_painel_comeca_pelos_filtros_e_todo_valor_vivo_e_formula():
     assert len(formulas) >= 40 and all(f.startswith("=") for f in formulas)
     reqs = p.montar_requests(1, 2, 120, len(valores) + 5, {"charts": [], "bandas": [], "condicionais": 0},
                              itens, *p.blocos(itens)[::2])
-    assert sum("addChart" in r for r in reqs) == 9
+    assert sum("addChart" in r for r in reqs) == 8  # rosca por frente saiu (repetia a capacidade semanal)
 
 
 def test_serie_diaria_reserva_espaco_para_a_sequencia_se_espalhar():

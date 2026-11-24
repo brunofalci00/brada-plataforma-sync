@@ -60,7 +60,7 @@ if os.environ.get("ASAAS_ENVIRONMENT"):
 ASAAS_BASE = ("https://api.asaas.com/v3" if ASAAS_ENVIRONMENT == "production"
               else "https://api-sandbox.asaas.com/v3")
 
-STAFF_DOMAINS = ("@brada.social", "@criape.com.br")
+STAFF_DOMAINS = ("@brada.social", "@criape.com.br", "@somosbrada.com.br", "brada.social.com")
 STAFF_MARKERS = ("teste", "test@")
 
 HEADER_ASAAS = [
@@ -200,7 +200,9 @@ def coletar_pre_approvals(db):
     parecem artefato de migracao, nao assinante cobrando hoje). Os outros 4 tem
     data de inicio/expiracao real. Nao da pra arbitrar qual numero e o assinante
     'de verdade' sem o Thiago; o certo e mostrar os dois lados, nao escolher um."""
-    docs = [d.to_dict() for d in db.collection("payment_pre_approvals").stream()]
+    # Sem equipe e teste (auditoria de 24/11: 14 dos 25 "ativos" eram da equipe ou de teste).
+    docs = [d for d in (x.to_dict() for x in db.collection("payment_pre_approvals").stream())
+            if not is_teste_ou_staff(d)]
     return dict(resumo_pre_approvals(docs), lead_ids=leads_que_assinaram(docs), origens=assinantes_por_origem(docs))
 
 

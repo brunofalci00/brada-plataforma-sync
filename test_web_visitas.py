@@ -22,7 +22,7 @@ def test_tipo_de_busca_marca_vence_generica():
     marca = w.PRODUTOS["pf"]["marca"]
     assert w.tipo_busca("espaco para evento rio de janeiro", marca) == "Generica"
     assert w.tipo_busca("primeira fila espaco", marca) == "Marca ou nome"
-    assert w.tipo_busca("casarao floresta", marca) == "Marca ou nome"
+    assert w.tipo_busca("casarao floresta", marca) == "Outras"  # nem marca nem generica
 
 
 def test_resto_oculto_fecha_o_total_do_dia():
@@ -42,11 +42,11 @@ def test_blocos_viram_bases_e_linhas_vivas():
     p = dp.Painel("Primeira Fila", "t", "s")
     w.blocos(p, ctl, "pf", dados)
     titulos = [getattr(c, "titulo", "") for linha in p.linhas for c in linha]
-    assert "Sessoes no site" in titulos and "Posicao media" in titulos
+    assert "Visitas medidas pelo Google" in titulos and "Posicao media no Google (menor e melhor)" in titulos
     assert any(t.startswith("Buscas que mais") for t in titulos)
 
 
-def test_blocos_sem_dado_mostram_aviso():
+def test_blocos_sem_dado_nao_ocupam_a_aba():
     p = dp.Painel("AprovAI", "t", "s")
     w.blocos(p, fl.controles("AprovAI", D), "aprovai", {"ga": [], "gsc": [], "top": [], "erros": []})
-    assert len(p.linhas) == 2
+    assert len(p.linhas) == 0  # sem aviso vazio na tela
