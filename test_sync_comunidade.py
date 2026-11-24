@@ -140,3 +140,11 @@ def test_primeira_acao_conta_uma_por_membro_quando_o_evento_traz_o_userid():
     acoes = sc.primeiras_acoes(dados)
     assert len(acoes) == 2  # u1 uma vez, a equipe fora, o evento antigo sem membro fica
     assert ("idealizador" in [p for _, p in acoes])
+
+
+def test_visitante_deslogado_nao_conta_como_primeira_acao():
+    dados = {"users": [], "activation_events": [
+        {"event": "first_relevant_action", "timestamp": "2026-11-24T10:00:00Z", "userId": None, "role": "visitante"},
+        {"event": "first_relevant_action", "timestamp": "2026-11-24T10:05:00Z", "userId": "", "role": ""},
+        {"event": "first_relevant_action", "timestamp": "2026-11-20T10:00:00Z"}]}
+    assert len(sc.primeiras_acoes(dados)) == 1  # so o evento antigo, sem a chave userId

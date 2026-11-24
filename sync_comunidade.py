@@ -220,6 +220,12 @@ def membro_do_evento(e):
     return str(e.get("userId") or e.get("user_id") or det.get("userId") or det.get("user_id") or "")
 
 
+def e_visitante(e):
+    """Desde 23/11 o site manda userId nulo e role "visitante" para quem nao esta logado: nao e membro.
+    Evento antigo (sem a chave userId) segue contando como antes."""
+    return str(e.get("role") or "").lower() == "visitante" or ("userId" in e and not e.get("userId"))
+
+
 def primeiras_acoes(dados):
     """[(dia, papel)] de primeira acao: 1 por membro (a mais antiga) quando o evento traz o userId, sem a
     equipe; evento antigo sem userId conta 1 por evento, como antes. O papel vem do evento ou do cadastro."""
@@ -227,6 +233,8 @@ def primeiras_acoes(dados):
     vistos, out = set(), []
     eventos = [e for e in dados["activation_events"] if e.get("event") == "first_relevant_action"]
     for e in sorted(eventos, key=lambda e: _texto_data(e.get("timestamp"))):
+        if e_visitante(e):
+            continue
         uid = membro_do_evento(e)
         u = usuarios.get(uid, {})
         if uid and (uid in vistos or (u and e_equipe(u))):
