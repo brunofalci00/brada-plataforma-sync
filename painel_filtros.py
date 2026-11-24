@@ -339,14 +339,15 @@ def comparacao_ab(titulo, flt, etapas, maturacao=None):
 
 
 def por_dimensao(titulo, flt, dimensao, valores, colunas, gradiente=(), cabecalho_dim=None):
-    """Tabela uma linha por valor da dimensao. colunas: [(cabecalho, 'soma'|'taxa', etapa)]."""
+    """Tabela uma linha por valor da dimensao. colunas: [(cabecalho, 'soma'|'taxa', etapa[, filtros fixos])]."""
     linhas = []
     for v in valores:
         linha = [v]
-        for _, tipo, etapa in colunas:
-            f = flt.soma_p(etapa, **{dimensao: v}) if tipo == "soma" else flt.taxa(etapa, **{dimensao: v})
+        for _, tipo, etapa, *extra in colunas:
+            fixos = dict(extra[0] if extra else {}, **{dimensao: v})
+            f = flt.soma_p(etapa, **fixos) if tipo == "soma" else flt.taxa(etapa, **fixos)
             linha.append(F(f))
         linhas.append(linha)
-    formatos = [None] + [dp.FMT_INT if t == "soma" else dp.FMT_PCT for _, t, _ in colunas]
-    return dp.Tabela(titulo, [cabecalho_dim or dimensao.capitalize()] + [c for c, _, _ in colunas], linhas,
+    formatos = [None] + [dp.FMT_INT if t == "soma" else dp.FMT_PCT for _, t, *_ in colunas]
+    return dp.Tabela(titulo, [cabecalho_dim or dimensao.capitalize()] + [c[0] for c in colunas], linhas,
                      formatos=formatos, gradiente=gradiente)

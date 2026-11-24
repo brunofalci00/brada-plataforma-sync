@@ -111,3 +111,11 @@ def test_numero_velho_aparece_no_rodape():
 def test_chaves_usadas_cobrem_tudo_que_a_visao_geral_le():
     _, faltando = vg.montar_painel({}, AGORA)
     assert set(faltando) <= vg.chaves_usadas() and "elaboracao_cadastros" not in vg.chaves_usadas()
+
+
+def test_uma_unidade_fica_no_singular():
+    import sync_visao_geral as vg
+    assert vg.celula_etapa(1, "reunioes", 222) == "1 reuniao (0,45%)"
+    assert vg.celula_etapa(1, "clicaram/responderam") == "1 clicou/respondeu"
+    assert vg.celula_etapa(2, "reunioes") == "2 reunioes"
+    assert vg.singular("com projeto apto") == "com projeto apto"
