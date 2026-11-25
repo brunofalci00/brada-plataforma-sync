@@ -273,3 +273,26 @@ def test_painel_mostra_ativas_canceladas_estornos_e_acesso_sem_pagar():
     assert valores["Cancelaram a recorrencia (desde o inicio)"] == 1
     assert valores["Acesso no app sem assinatura (hoje)"] == 9
     assert kpis["aprovai_canceladas"] == 1 and kpis["aprovai_estornos"] == 0
+
+
+def test_checkout_conta_visitante_unico_por_dia_nao_abertura():
+    """Thiago (25/11): checkout_view a cada abertura do modal, com o visitorId do page_view. A meta e visitante."""
+    from sync_aprovai import coletar_funil_rows
+
+    class Doc:
+        def __init__(self, d):
+            self.d = d
+
+        def to_dict(self):
+            return self.d
+
+    eventos = [Doc({"type": "checkout_view", "visitorId": "v1", "timestamp": "2026-11-26T10:00:00Z"}),
+               Doc({"type": "checkout_view", "visitorId": "v1", "timestamp": "2026-11-26T10:03:00Z"}),
+               Doc({"type": "checkout_view", "visitorId": "v2", "timestamp": "2026-11-26T11:00:00Z"}),
+               Doc({"type": "checkout_view", "timestamp": "2026-11-26T12:00:00Z"})]  # sem visitorId: conta 1
+
+    class Db:
+        def collection(self, nome):
+            return type("C", (), {"stream": lambda self: iter(eventos)})()
+
+    assert coletar_funil_rows(Db())[0][5] == 3

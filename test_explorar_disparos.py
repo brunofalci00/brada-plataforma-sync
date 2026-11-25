@@ -82,7 +82,7 @@ def test_divisao_por_semana_e_fila_da_visao_geral():
     fila = {sdr.ELABORACAO: {"enviados": 0, "na_fila": 239, "canal_fila": "whatsapp"}}
     linhas = ex.linhas_fila(envios, fila, D(2026, 11, 12), janela=28)
     assert linhas[1] == ["Elaboracao", 0, 0, 239, "WhatsApp"] and linhas[2][1] == 2 / 28
-    assert len(ex.componentes_visao_geral(envios, fila, D(2026, 11, 12))) == 2
+    assert len(ex.componentes_visao_geral(envios, fila, D(2026, 11, 12))) == 3
 
 
 def test_fonte_do_banco_nao_injeta_formula():
@@ -146,3 +146,18 @@ def test_link_usa_o_mesmo_hash_do_lead():
         def worksheet(self, _):
             return Aba()
     assert ed.cadastros_pelo_link(Planilha()) == frozenset({sdr.hash_lead("abc-1")})
+
+
+def test_fontes_por_frente_mostram_contatos_conversao_e_se_parou():
+    """Revisao do Bruno (25/11): de onde vem os contatos de cada frente, desde o inicio."""
+    envios = [dict(_e(sdr.APTOS, D(2026, 8, 14), fonte="icms-rj"), lead_hash="a"),
+              dict(_e(sdr.APTOS, D(2026, 8, 20), fonte="icms-rj", cadastro=True), lead_hash="b"),
+              dict(_e(sdr.APTOS, D(2026, 8, 21), fonte="icms-rj"), lead_hash="b"),
+              dict(_e(sdr.INCENTIVADOR, D(2026, 11, 20), fonte="patrocinadores-brada"), lead_hash="c"),
+              dict(_e(sdr.ELABORACAO, D(2026, 11, 20), fonte=None), lead_hash="d")]
+    linhas = ex.linhas_fontes(envios, D(2026, 11, 25))
+    assert [l[:2] for l in linhas] == [["Incentivador", "Patrocinadores da Brada (patrocinadores-brada)"],
+                                       ["Elaboracao", "sem fonte"],
+                                       ["Plataforma", "ICMS RJ (icms-rj)"]]
+    assert linhas[2][2:] == [2, 3, 0, "14/08/26", "21/08/26", 1, "parou em 21/08"]
+    assert linhas[0][-1] == "ativa"
