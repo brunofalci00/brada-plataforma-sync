@@ -124,8 +124,8 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None, sem_contato=0):
     p = dp.Painel(ABA, "Incentivador · do disparo da Brenda ao patrocinio fechado",
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · banco do SDR Brada + HubSpot ao vivo · "
                   "leads contados na data do 1o disparo; mude as células claras abaixo"
-                  + (f" · {sem_contato} card(s) do HubSpot sem contato ligado no banco da Automatize ficam fora"
-                     if sem_contato else ""))
+                  + (f" · {sem_contato} card(s) sem contato ligado no banco da Automatize: contam nos cards e reunioes"
+                     " da Brenda, mas nao no funil por disparo" if sem_contato else ""))
     p.linha(ctl)
 
     def ab(etapa):
@@ -186,12 +186,14 @@ def montar_raw(leads):
 
 
 def separar_cards(pares):
-    """{lead_id: deal_id} so dos cards ligados a um contato da Brenda; e quantos cards nao tem contato.
+    """({lead_id: deal_id} dos cards ligados a um contato da Brenda, [deal_id dos cards sem contato]).
 
-    Card sem contato (lead_id vazio) nao tem envio da Brenda que o explique: entrar na conta faria a Visao Geral
-    mostrar uma reuniao "vinda da Brenda" que a aba Brenda nao consegue ligar a nenhum disparo."""
+    Decisao do Bruno (25/11): todo card da tabela da Automatize veio da Brenda, com ou sem contato ligado, e card
+    em "Reuniao agendada" conta como reuniao feita (a Automatize nao tem como saber se aconteceu). O card sem
+    contato entra na tabela por executivo e nas reunioes da Brenda; so nao entra no funil por disparo, porque
+    nao ha envio que o explique."""
     ligados = {str(lead): deal for lead, deal in pares if lead is not None}
-    return ligados, sum(lead is None for lead, _ in pares)
+    return ligados, [deal for lead, deal in pares if lead is None]
 
 
 def coletar():
@@ -205,9 +207,10 @@ def coletar():
         conn.close()
     cards_por_lead, sem_contato = separar_cards(pares)
     if sem_contato:
-        print(f"[AVISO] {sem_contato} card(s) no HubSpot sem contato ligado no banco da Automatize: fora da conta")
-    cards = hub.cards_ao_vivo(list(cards_por_lead.values()))
-    return envios, cards_por_lead, cards, sem_contato
+        print(f"[AVISO] {len(sem_contato)} card(s) sem contato ligado no banco da Automatize: contam como card e "
+              "reuniao da Brenda, fora do funil por disparo")
+    cards = hub.cards_ao_vivo(list(cards_por_lead.values()) + sem_contato)
+    return envios, cards_por_lead, cards, len(sem_contato)
 
 
 def main():
