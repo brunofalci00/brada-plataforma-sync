@@ -183,6 +183,54 @@ def divisao_por_canal(envios, hoje, n=12):
     return [[s.strftime("%d/%m")] + [c[k] for k, _ in CANAIS] for s, c in cont.items()]
 
 
+# Nome legivel de cada fonte_slug do banco da Automatize; slug novo aparece cru ate entrar aqui.
+NOME_FONTE = {"salic": "SALIC, Lei Rouanet", "esporte-federal": "Lei de Incentivo ao Esporte",
+              "icms-rj": "ICMS RJ", "proac": "ProAC SP", "pronon": "PRONON", "pronas-pcd": "PRONAS/PCD",
+              "ancine": "Ancine", "iss-bh": "ISS BH", "patrocinadores-brada": "Patrocinadores da Brada"}
+FONTE_ATIVA_DIAS = 7  # fonte sem envio ha mais que isso aparece como "parou em dd/mm"
+CAB_FONTES = ["Frente", "Fonte do contato", "Contatos", "Envios", "Em 30 dias", "Primeiro envio",
+              "Ultimo envio", "Conversao final", "Situacao"]
+
+
+def rotulo_fonte(slug):
+    if not slug:
+        return SEM_FONTE
+    return f"{NOME_FONTE[slug]} ({slug})" if slug in NOME_FONTE else slug
+
+
+def linhas_fontes(envios, hoje):
+    """Revisao do Bruno (25/11): que fontes alimentam cada frente, desde o inicio, sem filtro.
+    [frente, fonte, contatos, envios, envios 30d, primeiro, ultimo, contatos com conversao final, situacao]."""
+    grupos = {}
+    for e in envios:
+        if e["modalidade"] not in NOME_FRENTE or not e["dia"]:
+            continue
+        g = grupos.setdefault((e["modalidade"], e.get("fonte") or ""),
+                              {"contatos": set(), "envios": 0, "recentes": 0, "dias": [], "conv": set()})
+        h = e.get("lead_hash") or id(e)
+        g["contatos"].add(h)
+        g["envios"] += 1
+        g["recentes"] += e["dia"] > hoje - datetime.timedelta(days=30)
+        g["dias"].append(e["dia"])
+        if etapas_do_envio(e)["resultado"]:
+            g["conv"].add(h)
+    ordem = {m: i for i, (m, _) in enumerate(FRENTES)}
+    out = []
+    for (m, fonte), g in sorted(grupos.items(), key=lambda kv: (ordem[kv[0][0]], -len(kv[1]["contatos"]))):
+        ultimo = max(g["dias"])
+        situacao = "ativa" if ultimo > hoje - datetime.timedelta(days=FONTE_ATIVA_DIAS) else             f"parou em {ultimo.strftime('%d/%m')}"
+        out.append([NOME_FRENTE[m], rotulo_fonte(fonte), len(g["contatos"]), g["envios"], g["recentes"],
+                    min(g["dias"]).strftime("%d/%m/%y"), ultimo.strftime("%d/%m/%y"), len(g["conv"]), situacao])
+    return out
+
+
+def tabela_fontes(envios, hoje):
+    return dp.Tabela("De onde vem os contatos de cada frente (desde o inicio, sem filtro)", CAB_FONTES,
+                     linhas_fontes(envios, hoje),
+                     formatos=[None, None, dp.FMT_INT, dp.FMT_INT, dp.FMT_INT, None, None, dp.FMT_INT, None],
+                     gradiente=[2], spans=[1, 3, 1, 1, 1, 1, 1, 1, 2])
+
+
 def linhas_fila(envios, fila, hoje, janela=28):
     """Tabela da Visao Geral: [frente, envios por dia na janela, enviados hoje, na fila, canal da fila]."""
     inicio = hoje - datetime.timedelta(days=janela - 1)
@@ -248,6 +296,7 @@ def componentes_visao_geral(envios, fila, hoje):
          dp.Serie("Envios por canal por semana (foto de hoje, sem filtro)", ["Semana"] + [n for _, n in CANAIS],
                   divisao_por_canal(envios, hoje), empilhado=True,
                   subtitulo="As três frentes juntas · para uma frente só, use o filtro do topo")),
+        (tabela_fontes(envios, hoje),),
         (dp.Tabela("Fila de envio hoje (sem filtro)",
                    ["Frente", "Mensagens por dia (28d)", "Enviadas hoje", "Esperando na fila", "Canal da fila"],
                    linhas_fila(envios, fila, hoje),

@@ -299,7 +299,7 @@ def _n(r, i):
 
 def coletar_funil_rows(db):
     eventos = list(db.collection("analytics_funnel_events").stream())
-    por_dia = {}
+    por_dia, checkout = {}, {}
     for e in eventos:
         d = e.to_dict()
         dia = str(d.get("timestamp", ""))[:10]
@@ -311,6 +311,9 @@ def coletar_funil_rows(db):
             continue
         if t == "cta_click" and not clique_de_compra(d):
             continue
+        if t == "checkout_view":  # meta da Tamyris e visitante do checkout, nao abertura do modal
+            checkout.setdefault(dia, set()).add(d.get("visitorId") or getattr(e, "id", None) or id(e))
+            continue
         if t in ("page_view", "cta_click", "lead_captured", "checkout_view", "purchase_completed"):
             por_dia[dia][t] += 1
 
@@ -318,7 +321,8 @@ def coletar_funil_rows(db):
     for dia in sorted(por_dia.keys()):
         c = por_dia[dia]
         rows.append([dia, c["page_view"], c["cta_click"], c["lead_captured"],
-                     "Firestore analytics_funnel_events (aprovai-de156)", c["checkout_view"], c["purchase_completed"]])
+                     "Firestore analytics_funnel_events (aprovai-de156)", len(checkout.get(dia, ())),
+                     c["purchase_completed"]])
     return rows
 
 
