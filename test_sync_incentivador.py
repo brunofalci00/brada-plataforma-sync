@@ -87,7 +87,12 @@ def test_painel_com_executivos_mostra_tabela_de_cobranca():
     assert not any(t.startswith("A Brenda esta disparando") for t in titulos)  # alerta mora na Brenda e na Visao Geral
 
 
-def test_card_sem_contato_fica_fora_e_e_contado_a_parte():
+def test_card_sem_contato_sai_do_funil_mas_volta_para_a_conta_de_cards():
+    """Cultivo (25/11): card da Automatize em Reuniao agendada sem contato ligado conta como reuniao da Brenda."""
     import sync_incentivador as si
     ligados, sem = si.separar_cards([("l1", "d1"), (None, "d2"), ("l3", "d3")])
-    assert ligados == {"l1": "d1", "l3": "d3"} and sem == 1
+    assert ligados == {"l1": "d1", "l3": "d3"} and sem == ["d2"]
+    cards = {"d1": {"estagio": "x", "dono": "", "criado": "", "entrou_estagio": "", "passou_reuniao": False},
+             "d2": {"estagio": "1246562476", "dono": "", "criado": "", "entrou_estagio": "", "passou_reuniao": True}}
+    linhas = si.por_executivo(cards, {}, None)
+    assert sum(r[5] for r in linhas) == 1  # a reuniao do card sem contato conta
