@@ -27,3 +27,16 @@ def test_blocos_sem_cupom_nao_desenha_nada_e_com_cupom_fecha_a_grade():
     assert p.linhas == []
     pc.blocos(p, REG, HOJE)
     assert [c.titulo.split(":")[0] for linha in p.linhas for c in linha] == ["Cupons", "Cupons"]
+
+
+def test_celula_com_cara_de_dado_pessoal_vira_so_protocolo():
+    reg = [("C", "t", HOJE, None, "", HOJE, "fulano@gmail.com (PF-2026-9), Sala (PF-2026-8)", 0),
+           ("C", "t", HOJE, None, "", HOJE, "Tel 21 99876-5432 (PF-2026-7)", 0)]
+    linhas = pc.lista(reg)
+    assert linhas[0][1] == "PF-2026-9, PF-2026-8"
+    assert linhas[1][1] == "PF-2026-7"
+
+
+def test_so_espaco_publicado_e_visivel_mostra_o_nome():
+    assert "revisao_status = 'publicado' and not coalesce(e.revisao_oculto, false)" in pc.CONSULTA
+    assert "else e.protocol end" in pc.CONSULTA
