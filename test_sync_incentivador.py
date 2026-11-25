@@ -80,8 +80,9 @@ def test_painel_com_executivos_mostra_tabela_de_cobranca():
     execs = [["Ana", 3, 1, 0, 2, 1, 0, 1, 1 / 3], [si.SEM_DONO, 1, 1, 1, 15, 0, 0, 0, 0.0]]
     painel, _, _ = si.montar_painel({}, hs, datetime.datetime(2026, 11, 16, 9), execs)
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
-    assert any(t.startswith("Retorno de cada executivo") for t in titulos)
-    assert "Sem executivo dono" in titulos
+    assert any(t.startswith("Cards da Brenda por executivo") for t in titulos)
+    assert not any("Agendamento" in str(t) for t in titulos)
+    assert "Cards sem executivo dono (hoje)" in titulos
     assert "Reunioes da Brenda (desde o inicio)" in titulos and "Card ate reuniao" not in titulos
     assert not any(t.startswith("A Brenda esta disparando") for t in titulos)  # alerta mora na Brenda e na Visao Geral
 

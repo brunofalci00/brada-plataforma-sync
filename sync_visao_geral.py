@@ -23,16 +23,9 @@ PRODUTOS = [
     ("Incentivador", "Brenda -> incentivadores", "desde 01/09",
      [("disparados", "incentivador_disparados"), ("clicaram/responderam", "incentivador_engajaram"),
       ("reunioes", "incentivador_cards_reuniao")]),
-    ("Proponente plataforma", "Brenda -> ONGs", "desde 14/08",
-     [("disparados", "aptos_sdr_disparados"), ("cadastraram", "aptos_sdr_cadastros"),
-      ("projetos aptos", "aptos_sdr_aptos")]),
+    # Decisao do Bruno (25/11): uma linha por publico, de todas as origens. O pedaco da Brenda mora na aba Brenda.
     ("Proponente plataforma", "Plataforma, todas as origens", "total",
      [("contas novas", "plataforma_novos_cadastros"), ("com projeto apto", "plataforma_novos_aptos")]),
-    # Decisao de 23/11: o fim da elaboracao e a assinatura do AprovAI (lead_id da Brenda no utm_term),
-    # medida so desde 23/11. Na linha do site, o assinante nao vem necessariamente do lead: sem %.
-    ("Proponente elaboracao", "Brenda -> elaboracao", "desde 27/08",
-     [("disparados", "elaboracao_disparados"), ("clicaram/responderam", "elaboracao_engajaram"),
-      ("assinaram (desde 23/11)", "elaboracao_assinantes")]),
     ("Proponente elaboracao", "AprovAI (site e app)", "desde 26/10",
      [("visitas", "aprovai_visitas"), ("foram ao checkout", "aprovai_checkout"), ("compraram", "aprovai_compras")]),
     ("Comunidade", "Comunidade", "total",

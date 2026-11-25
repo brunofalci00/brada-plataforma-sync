@@ -50,3 +50,17 @@ def test_blocos_sem_dado_nao_ocupam_a_aba():
     p = dp.Painel("AprovAI", "t", "s")
     w.blocos(p, fl.controles("AprovAI", D), "aprovai", {"ga": [], "gsc": [], "top": [], "erros": []})
     assert len(p.linhas) == 0  # sem aviso vazio na tela
+
+
+def test_busca_pelo_nome_ou_endereco_de_um_espaco_do_guia_conta_como_nome():
+    """Revisao de 25/11: 'espaco multicultural gene insanno' era generica so por ter 'espaco'."""
+    marca = ("primeira fila",)
+    nomes = w.nomes_de_espaco([("Espaço Multicultural Gene Insanno", "Rua X, 10"),
+                               ("Dinastia Hub", "Av. Europa, 884 - Jardim Europa Jardim Paulista"),
+                               ("Quadra", "Rua do Lazer, 140 B Pilares")])
+    assert w.tipo_busca("espaço multicultural gene insanno", marca, nomes) == "Marca ou nome"
+    assert w.tipo_busca("dinastia hub endereço", marca, nomes) == "Marca ou nome"
+    assert w.tipo_busca("avenida europa 884", marca, nomes) == "Marca ou nome"
+    assert w.tipo_busca("rua do lazer 140 pilares", marca, nomes) == "Marca ou nome"
+    assert w.tipo_busca("espaco para festa rio", marca, nomes) == "Generica"
+    assert w.tipo_busca("teatro tobias barreto capacidade", marca, nomes) == "Outras"  # nao esta no guia

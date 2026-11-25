@@ -210,7 +210,8 @@ def test_aba_abre_pelo_asaas_e_nao_mostra_a_brenda():
     assert cartoes[:2] == ["Assinantes pagando (Asaas, hoje)", "Receita recorrente (MRR, Asaas, hoje)"]
     assert painel.linhas[1][1].valor == 89.0
     titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
-    assert titulos.index("Assinantes: quantos pagam de fato (hoje, sem equipe e teste)") < titulos.index("Site do AprovAI (periodo A)")
+    assert titulos.index("Assinaturas ativas (Asaas, hoje)") < titulos.index("Site do AprovAI (periodo A)")
+    assert "Assinantes: quantos pagam de fato (hoje, sem equipe e teste)" not in titulos  # funil confuso saiu (25/11)
     assert not [t for t in titulos if "Brenda" in t]
     assert kpis["aprovai_mrr"] == 89.0
 
@@ -246,3 +247,29 @@ def test_clique_de_login_nao_conta_como_ida_ao_checkout():
     assert rotulo_checkout(rows) == "Clique em comprar ate a compra"
     rows[0][5] = 3  # o evento do checkout chegou: ele vira o topo da taxa
     assert "Abriram o checkout" in [n for n, _ in funil_site(rows)] and rotulo_checkout(rows) == "Checkout ate a compra"
+
+
+def test_resumo_assinaturas_separa_ativas_canceladas_e_estornos():
+    """Caso real de 25/11: 2 ativas (17 e 22/11), 2 canceladas e estornadas em outubro; equipe fora."""
+    from sync_aprovai import resumo_assinaturas
+    subs = [{"status": "ACTIVE", "apagada": False, "equipe": False}, {"status": "ACTIVE", "apagada": False, "equipe": False},
+            {"status": "INACTIVE", "apagada": True, "equipe": False}, {"status": "INACTIVE", "apagada": True, "equipe": False},
+            {"status": "ACTIVE", "apagada": False, "equipe": True}]
+    linha = lambda st, eq=False: ["t", "p", "c", st, 89.0, "CREDIT_CARD", "", "", eq]  # noqa: E731
+    cobr = [linha("REFUNDED"), linha("REFUNDED"), linha("CONFIRMED"), linha("REFUNDED", True)]
+    assert resumo_assinaturas(subs, cobr) == {"assinaturas_ativas": 2, "assinaturas_canceladas": 2, "estornos": 2}
+
+
+def test_painel_mostra_ativas_canceladas_estornos_e_acesso_sem_pagar():
+    import datetime
+    from sync_aprovai import montar_painel
+    resumo = {"assinantes_reais_ativos": 2, "mrr_real": 178.0}
+    pre = {"total_ativos_no_app": 11, "migrados_kiwify_sem_billing_asaas": 7, "com_billing_asaas_real": 4}
+    subs = [{"status": "ACTIVE", "apagada": False, "equipe": False}] * 2 + [{"status": "INACTIVE", "apagada": True, "equipe": False}]
+    painel, kpis, _ = montar_painel([["2026-11-11", 7, 1, 0, "f"]], resumo, pre, [], None, None,
+                                    datetime.datetime(2026, 11, 25, 9), assinaturas=subs)
+    valores = {c.titulo: c.valor for linha in painel.linhas for c in linha if hasattr(c, "valor")}
+    assert valores["Assinaturas ativas (Asaas, hoje)"] == 2
+    assert valores["Cancelaram a recorrencia (desde o inicio)"] == 1
+    assert valores["Acesso no app sem assinatura (hoje)"] == 9
+    assert kpis["aprovai_canceladas"] == 1 and kpis["aprovai_estornos"] == 0

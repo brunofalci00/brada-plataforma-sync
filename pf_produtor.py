@@ -1,4 +1,4 @@
-"""Prospeccao de produtores da Primeira Fila (SALIC) e e-mail de espacos por modelo.
+"""Prospeccao de produtores da Primeira Fila (SALIC).
 
 Fonte: visoes `dados.prospeccao_produtores` (um produtor por linha) e `dados.prospeccao_emails`
 (um e-mail por linha), criadas pela Automatize em 19/11. So agregados saem daqui: nome, e-mail,
@@ -26,13 +26,6 @@ CONSULTA_FILA = """
     select count(*), count(*) filter (where enviado_em is not null or whatsapp_enviado_em is not null),
            count(*) filter (where nullif(telefone, '') is not null)
     from dados.prospeccao_produtores"""
-
-# E-mail de prospeccao por publico e modelo (copy), desde o primeiro envio.
-CONSULTA_MODELOS = """
-    select publico, coalesce(modelo, 'sem modelo'), min(enviado_em at time zone 'America/Sao_Paulo')::date,
-           count(*) filter (where enviado_em is not null), count(clicou_em), count(cadastrado_em),
-           count(descadastrou_em)
-    from dados.prospeccao_emails group by 1, 2 order by 1, 3"""
 
 BASE = fl.Base("base_pf_produtor", [("lei", "Lei", fl.TODAS), ("uf", "UF", fl.TODAS),
                                     ("canal_produtor", "Canal", fl.TODOS)], [
@@ -64,25 +57,11 @@ def coletar(cur):
     registros = cur.fetchall()
     cur.execute(CONSULTA_FILA)
     fila = dict(zip(("total", "abordados", "com_telefone"), cur.fetchone()))
-    cur.execute(CONSULTA_MODELOS)
-    return {"produtor_linhas": registros, "produtor_fila": fila, "modelos_email": cur.fetchall()}
-
-
-def tabela_modelos(modelos):
-    corpo = []
-    for publico, modelo, desde, enviados, clicaram, cadastraram, descad in modelos:
-        corpo.append([PUBLICOS.get(publico, publico), modelo, desde.strftime("%d/%m") if desde else "",
-                      enviados, clicaram, dp.taxa(clicaram, enviados), cadastraram, descad,
-                      dp.taxa(descad, enviados)])
-    return dp.Tabela("Desempenho de cada versao do e-mail de prospeccao (desde o primeiro envio, sem filtro)",
-                     ["Publico", "Versao do e-mail", "Desde", "Enviados", "Clicaram", "% clique", "Cadastraram",
-                      "Descadastraram", "% descadastro"], corpo,
-                     formatos=[None, None, None, dp.FMT_INT, dp.FMT_INT, dp.FMT_PCT, dp.FMT_INT, dp.FMT_INT,
-                               dp.FMT_PCT])
+    return {"produtor_linhas": registros, "produtor_fila": fila}
 
 
 def blocos(painel, ctl, dados):
-    """Produtor (SALIC): fila, funil do periodo A, A x B, por lei e canal; depois o e-mail por copy.
+    """Produtor (SALIC): fila, funil do periodo A, A x B, por lei e canal; sem a tabela por versao do e-mail (saiu em 25/11: a versao 1 de anfitriao estava errada e foi trocada).
     Devolve (linhas da base, resumo)."""
     pl = linhas(dados.get("produtor_linhas", []))
     fila = dados.get("produtor_fila") or {"total": 0, "abordados": 0, "com_telefone": 0}
@@ -104,7 +83,6 @@ def blocos(painel, ctl, dados):
         painel.linha(fl.por_dimensao("Produtor por lei (periodo A)", fp, "lei", leis, [
             ("Abordados", "soma", "abordados"), ("Clicaram", "taxa", "clicaram"), ("Cadastraram", "soma", "cadastraram"),
             ("Descadastraram", "taxa", "descadastraram")], gradiente=[1], cabecalho_dim="Lei"))
-    painel.linha(tabela_modelos(dados.get("modelos_email", [])))
     total = {k: sum(l[BASE.cabecalho.index(c)] for l in pl) for k, c in BASE.etapas}
     resumo = {"pf_produtor_abordados": total["abordados"], "pf_produtor_clicaram": total["clicaram"],
               "pf_produtor_cadastros": total["cadastraram"]}

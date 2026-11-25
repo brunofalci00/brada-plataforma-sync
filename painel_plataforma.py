@@ -70,7 +70,7 @@ def linhas_sdr(leads):
 
 
 def linhas_contas(user_records, project_records):
-    """Contas novas de ONG (sem migrados) na data do cadastro, por origem; projeto/publicou/apto = foto de hoje."""
+    """Contas novas de proponente (sem migrados) na data do cadastro, por origem; projeto/publicou/apto = foto de hoje."""
     rotulo = dict(CANAIS)
     projetos = {}
     for pr in project_records:
@@ -126,7 +126,7 @@ def _controles(hoje, sdr_linhas, contas_linhas):
         fl.campo_lista("origem", "Origem da conta", BASE_CONTAS.opcoes(contas_linhas, "origem"), span=2)]), canais
 
 
-PAGINAS = {"/": "Pagina inicial", "/login": "Entrar", "/ong": "Area da ONG", "/ong/projects": "Projetos da ONG"}
+PAGINAS = {"/": "Pagina inicial", "/login": "Entrar", "/ong": "Area do proponente", "/ong/projects": "Projetos do proponente"}
 
 
 def nome_pagina(caminho):
@@ -147,7 +147,7 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · dados da plataforma e da Brenda (prospeccao"
                   " automatica) · mude as células claras abaixo")
     p.linha(ctl)
-    p.linha(fl.CartaoVivo("Brenda: ONGs contatadas", fsdr.soma_p("disparados", "A"), fsdr.soma_p("disparados", "B")),
+    p.linha(fl.CartaoVivo("Brenda: proponentes contatados", fsdr.soma_p("disparados", "A"), fsdr.soma_p("disparados", "B")),
             fl.CartaoVivo("Brenda: cadastros", fsdr.soma_p("cadastro", "A"), fsdr.soma_p("cadastro", "B")),
             fl.CartaoVivo("Contas novas (todas as origens)", fcontas.soma_p("contas", "A"),
                           fcontas.soma_p("contas", "B")),
@@ -168,7 +168,7 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                                 ("Clique (%)", "taxa", "engajaram"), ("Cadastros", "soma", "cadastro"),
                                 ("Cadastro (%)", "taxa", "cadastro"), ("Aptos", "soma", "apto")],
                             gradiente=[1, 5], cabecalho_dim="Fonte"))
-    p.linha(fl.por_dimensao("Contas novas por origem que a ONG marcou (periodo A) · Automatize = qualquer link "
+    p.linha(fl.por_dimensao("Contas novas por origem que o proponente marcou (periodo A) · Automatize = qualquer link "
                             "deles, nao so quem a Brenda contatou", fcontas, "origem", origens, [
         ("Contas", "soma", "contas"), ("Criaram projeto", "taxa", "criaram"), ("Publicaram", "taxa", "publicaram"),
         ("Aptos", "soma", "aptos"), ("Conta ate apto", "taxa", "aptos")], gradiente=[1, 5], cabecalho_dim="Origem"))
@@ -177,7 +177,7 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
     ga = m.get("ga")
     p.linha(dp.Cartao("Projetos aptos a captar (hoje)", m["proj_ativos"],
                       base=_valor_em(tendencia_rows, 1, ha_30), descricao_base="vs 30 dias atras"),
-            dp.Cartao("ONGs que acessaram em 30 dias", m.get("ongs_ativas_30d", m["ativos_30d"])),
+            dp.Cartao("Proponentes que acessaram em 30 dias", m.get("ongs_ativas_30d", m["ativos_30d"])),
             dp.Cartao("Prazo vencido, a reativar", m["proj_a_reativar"]),
             dp.Cartao("Visitantes no site (30 dias)", ga["ativos"] if ga else 0))
     p.linha(dp.Rosca("Estoque de projetos (foto de hoje)", [
@@ -188,7 +188,7 @@ def montar_painel(m, tendencia_rows, leads_sdr, envios_sdr, agora, user_records=
                 ["Ate 30 dias", m["vence_30d"]], ["31 a 60 dias", m["vence_60d"] - m["vence_30d"]],
                 ["61 a 90 dias", m["vence_90d"] - m["vence_60d"]], ["91 a 180 dias", m["vence_180d"] - m["vence_90d"]],
                 ["Mais de 180 dias", max(m["proj_ativos"] - m["vence_180d"], 0)]],
-                subtitulo=f"{m.get('vence_3112', 0)} vencem em 31/12: e o prazo anual do Diario Oficial; a ONG renova, nao e desistencia"))
+                subtitulo=f"{m.get('vence_3112', 0)} vencem em 31/12: e o prazo anual do Diario Oficial; o proponente renova, nao e desistencia"))
     if m.get("st_rascunho"):
         p.linha(dp.Serie(f"O que falta nos {m['st_rascunho']} rascunhos (foto de hoje)", ["Situacao", "Rascunhos"], [
             ["Faltam ate 3 campos (perto de publicar)", m.get("rasc_perto", 0)],

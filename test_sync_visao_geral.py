@@ -51,11 +51,19 @@ def test_receita_digital_soma_aprovai_e_primeira_fila():
 def test_etapas_escritas_com_percentual_sobre_a_anterior_e_periodo():
     painel, _ = vg.montar_painel(_resumo(), AGORA)
     linhas = {l[1]: l for l in _componente(painel, "Funil de cada produto").linhas}
-    aptos = linhas["Brenda -> ONGs"]
-    assert aptos[2] == "desde 14/08"
-    assert aptos[3] == "1.986 disparados" and aptos[4] == f"59 cadastraram ({vg.dp.pct_br(59 / 1986)})" and aptos[5].startswith("17 projetos aptos (")
+    inc = linhas["Brenda -> incentivadores"]
+    assert inc[2] == "desde 01/09" and inc[3].endswith("disparados") and "(" in inc[4]
     plat = linhas["Plataforma, todas as origens"]
     assert plat[4] == "" and round(plat[6], 4) == round(57 / 156, 4)
+
+
+def test_uma_linha_por_publico_sem_repetir_a_brenda():
+    """Revisao do Bruno (25/11): proponente plataforma e elaboracao tinham a linha da Brenda e a do produto."""
+    painel, _ = vg.montar_painel(_resumo(), AGORA)
+    publicos = [l[0] for l in _componente(painel, "Funil de cada produto").linhas]
+    assert publicos.count("Proponente plataforma") == 1 and publicos.count("Proponente elaboracao") == 1
+    assert publicos.count("Primeira Fila") == 2  # anfitriao e produtor sao publicos diferentes
+    assert not any("ONG" in str(c) for l in _componente(painel, "Funil de cada produto").linhas for c in l)
 
 
 def test_precisa_de_acao_agir_vem_primeiro():
