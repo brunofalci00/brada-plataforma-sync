@@ -69,6 +69,13 @@ def test_serie_diaria_reserva_espaco_para_a_sequencia_se_espalhar():
     assert len(bloco) == ex.MAX_PONTOS + 1 and "SEQUENCE" in bloco[1][0]
 
 
+def test_divisao_por_canal_separa_email_e_whatsapp_por_semana():
+    envios = [_e(ex.sdr.INCENTIVADOR, D(2026, 11, 10), canal="email"),
+              _e(ex.sdr.ELABORACAO, D(2026, 11, 11), canal="whatsapp"),
+              _e(ex.sdr.APTOS, D(2026, 11, 3), canal="email")]
+    assert ex.divisao_por_canal(envios, D(2026, 11, 12), n=2) == [["02/11", 1, 0], ["09/11", 1, 1]]
+
+
 def test_divisao_por_semana_e_fila_da_visao_geral():
     envios = [_e(sdr.INCENTIVADOR, D(2026, 11, 10)), _e(sdr.APTOS, D(2026, 11, 11)), _e(sdr.APTOS, D(2026, 11, 3))]
     assert ex.divisao_por_semana(envios, D(2026, 11, 12), n=2) == [["02/11", 0, 0, 1], ["09/11", 1, 0, 1]]

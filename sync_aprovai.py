@@ -181,6 +181,32 @@ def resumo_asaas(rows, hoje=None):
     }
 
 
+def coletar_assinaturas():
+    """Assinaturas do AprovAI no Asaas, inclusive as apagadas (cancelar a recorrencia apaga a assinatura).
+    So o necessario para contar: situacao, se foi apagada e se e equipe ou teste. Nada de cliente sai daqui."""
+    subs = [x for x in asaas_paginate("/subscriptions?includeDeleted=true&limit=100&offset={offset}")
+            if is_aprovai_transaction(x)]
+    clientes = {}
+    for x in subs:
+        cid = x.get("customer")
+        if cid not in clientes:
+            try:
+                clientes[cid] = asaas_get(f"/customers/{cid}")
+            except urllib.error.HTTPError:
+                clientes[cid] = {}
+    return [{"status": x.get("status"), "apagada": bool(x.get("deleted")),
+             "equipe": is_teste_ou_staff(clientes[x.get("customer")])} for x in subs]
+
+
+def resumo_assinaturas(assinaturas, asaas_rows):
+    """Revisao do Bruno (25/11): assinantes ativos, quem cancelou a recorrencia e quem pediu o dinheiro de volta,
+    cada um separado. Ativa = ACTIVE e nao apagada; cancelada = apagada ou inativa; estorno = cobranca devolvida."""
+    reais = [a for a in assinaturas if not a["equipe"]]
+    ativas = sum(1 for a in reais if a["status"] == "ACTIVE" and not a["apagada"])
+    return {"assinaturas_ativas": ativas, "assinaturas_canceladas": len(reais) - ativas,
+            "estornos": sum(1 for r in asaas_rows if not r[8] and r[3] in ("REFUNDED", "REFUND_REQUESTED"))}
+
+
 # ===================================================
 # FIRESTORE (projeto aprovai-de156)
 # ===================================================
@@ -401,7 +427,8 @@ def _visitas_vivas(fsite):
                         altura=320, subtitulo="Por dia ou semana · todas as origens")
 
 
-def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora, web=None):
+def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, agora, web=None,
+                  assinaturas=None):
     """Aba do produto: abre pelo Asaas (quem paga e quanto), depois o site e as visitas.
     O SDR de elaboracao (Brenda) nao aparece aqui: mora na aba Brenda; so os numeros dele seguem
     para a Visao Geral pelo resumo."""
@@ -420,13 +447,13 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
             fl.CartaoVivo("Site: visitas a pagina", fs.soma_p("visitas", "A"), fs.soma_p("visitas", "B")),
             fl.CartaoVivo(rotulo_checkout(funil_rows), fs.taxa("compras", "A", sobre=topo_do_checkout(funil_rows)),
                           fs.taxa("compras", "B", sobre=topo_do_checkout(funil_rows)), dp.FMT_PCT))
-    p.linha(dp.Funil("Assinantes: quantos pagam de fato (hoje, sem equipe e teste)", [
-                ("Liberados no app", pre_approvals["total_ativos_no_app"]),
-                ("Com plano contratado", pre_approvals["com_billing_asaas_real"]),
-                ("Pagando (Asaas)", resumo["assinantes_reais_ativos"])],
-                subtitulo=f"So a ultima barra e receita · {pre_approvals['migrados_kiwify_sem_billing_asaas']} "
-                          "liberados vieram da plataforma antiga, sem cobranca"),
-            dp.Tabela("Cobrancas no Asaas hoje (sem equipe)", ["Situacao", "Cobrancas"],
+    sub = resumo_assinaturas(assinaturas or [], asaas_rows)
+    p.linha(dp.Cartao("Assinaturas ativas (Asaas, hoje)", sub["assinaturas_ativas"]),
+            dp.Cartao("Cancelaram a recorrencia (desde o inicio)", sub["assinaturas_canceladas"]),
+            dp.Cartao("Estornos: dinheiro devolvido (desde o inicio)", sub["estornos"]),
+            dp.Cartao("Acesso no app sem assinatura (hoje)",
+                      max(pre_approvals["total_ativos_no_app"] - sub["assinaturas_ativas"], 0)))
+    p.linha(dp.Tabela("Cobrancas no Asaas hoje (sem equipe)", ["Situacao", "Cobrancas"],
                       [[s, n] for s, n in cobrancas_por_situacao(asaas_rows)], formatos=[None, dp.FMT_INT]))
     brenda = sum(l.get("assinou", False) for l in (leads_elab or {}).values())
     p.linha(dp.Tabela("Planos contratados no app, por origem (hoje)", ["Origem gravada no cadastro", "Planos"],
@@ -443,7 +470,9 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
                   "aprovai_checkout": sum(_n(r, topo) for r in funil_rows),
                   "aprovai_compras": sum(_n(r, 6) for r in funil_rows),
                   "aprovai_assinantes": resumo["assinantes_reais_ativos"], "aprovai_mrr": resumo["mrr_real"],
-                  "aprovai_ativos_app": pre_approvals["total_ativos_no_app"]}
+                  "aprovai_ativos_app": pre_approvals["total_ativos_no_app"],
+                  "aprovai_assinaturas_ativas": sub["assinaturas_ativas"],
+                  "aprovai_canceladas": sub["assinaturas_canceladas"], "aprovai_estornos": sub["estornos"]}
     if elab:
         resumo_kpi.update({"elaboracao_disparados": elab[0][1], "elaboracao_engajaram": elab[2][1],
                            "elaboracao_assinantes": elab[-1][1]})
@@ -498,6 +527,8 @@ def main():
     funil_rows = coletar_funil_rows(db)
     print(f"  {len(funil_rows)} dias com evento")
 
+    assinaturas = coletar_assinaturas()
+    print(f"  {len(assinaturas)} assinaturas no Asaas (com apagadas e equipe)")
     pre_approvals = coletar_pre_approvals(db)
     print(f"  payment_pre_approvals: {pre_approvals['total_ativos_no_app']} ativos no app, "
           f"{pre_approvals['migrados_kiwify_sem_billing_asaas']} migrados do Kiwify sem billing real")
@@ -514,7 +545,7 @@ def main():
     sync.pii_guard(dict(tabs, origens_assinantes=(["origem", "n"], [list(o) for o in pre_approvals["origens"]])))
     print("pii_guard: OK (zero hits)")
     painel, resumo_kpi, bases = montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, envios_elab, now,
-                                              web_visitas.coletar("aprovai", now.date()))
+                                              web_visitas.coletar("aprovai", now.date()), assinaturas)
     print("  resumo:", resumo_kpi)
 
     if args.dry_run:

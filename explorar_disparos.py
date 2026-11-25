@@ -174,6 +174,15 @@ def divisao_por_semana(envios, hoje, n=12):
     return [[s.strftime("%d/%m")] + [c[m] for m, _ in FRENTES] for s, c in cont.items()]
 
 
+def divisao_por_canal(envios, hoje, n=12):
+    """[[segunda dd/mm, e-mail, whatsapp]] das ultimas n semanas, as tres frentes juntas (revisao de 25/11)."""
+    cont = {s: {c: 0 for c, _ in CANAIS} for s in sdr.semanas(hoje, n)}
+    for e in envios:
+        if e["dia"] and e["canal"] in cont.get(sdr.segunda(e["dia"]), {}):
+            cont[sdr.segunda(e["dia"])][e["canal"]] += 1
+    return [[s.strftime("%d/%m")] + [c[k] for k, _ in CANAIS] for s, c in cont.items()]
+
+
 def linhas_fila(envios, fila, hoje, janela=28):
     """Tabela da Visao Geral: [frente, envios por dia na janela, enviados hoje, na fila, canal da fila]."""
     inicio = hoje - datetime.timedelta(days=janela - 1)
@@ -235,7 +244,10 @@ def componentes_visao_geral(envios, fila, hoje):
     return [
         (dp.Serie("Capacidade da Brenda por semana (foto de hoje, sem filtro)", ["Semana"] + [n for _, n in FRENTES],
                   divisao_por_semana(envios, hoje), empilhado=True,
-                  subtitulo=f"A mesma IA dispara para as três frentes · {nota}"),),
+                  subtitulo=f"A mesma IA dispara para as três frentes · {nota}"),
+         dp.Serie("Envios por canal por semana (foto de hoje, sem filtro)", ["Semana"] + [n for _, n in CANAIS],
+                  divisao_por_canal(envios, hoje), empilhado=True,
+                  subtitulo="As três frentes juntas · para uma frente só, use o filtro do topo")),
         (dp.Tabela("Fila de envio hoje (sem filtro)",
                    ["Frente", "Mensagens por dia (28d)", "Enviadas hoje", "Esperando na fila", "Canal da fila"],
                    linhas_fila(envios, fila, hoje),

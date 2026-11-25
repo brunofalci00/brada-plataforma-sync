@@ -13,6 +13,7 @@ Falha de API nao derruba a aba: o bloco sai com o aviso no lugar dos numeros.
 import datetime
 import os
 import time
+import unicodedata
 
 import dashboard_painel as dp
 import ga_analytics
@@ -65,9 +66,34 @@ def canal(origem, midia):
     return "Outros"
 
 
-def tipo_busca(consulta, marca):
+PALAVRAS_DE_APOIO = ("endereco", "capacidade", "telefone", "contato", "como chegar", "fotos", "preco")
+ABREVIACOES = {"av": "avenida", "r": "rua", "pca": "praca", "estr": "estrada", "al": "alameda"}
+
+
+def normal(t):
+    t = unicodedata.normalize("NFKD", str(t or "").lower())
+    t = "".join(c if c.isalnum() else " " for c in t if not unicodedata.combining(c))
+    return " ".join(ABREVIACOES.get(p, p) for p in t.split())
+
+
+def nomes_de_espaco(espacos):
+    """Nome e endereco de cada espaco do guia, normalizados, so para classificar a busca (nao vao para a planilha)."""
+    return frozenset(n for nome, endereco in espacos for n in (normal(nome), normal(endereco)) if len(n) >= 5)
+
+
+def _busca_um_espaco(consulta, nomes):
+    """'dinastia hub endereco' ou 'avenida europa 884': quem buscou ja sabe qual espaco quer (revisao de 25/11)."""
+    q = normal(consulta)
+    nucleo = q
+    for p in PALAVRAS_DE_APOIO:
+        nucleo = f" {nucleo} ".replace(f" {p} ", " ").strip()
+    # Endereco: todas as palavras da busca estao no endereco + bairro ('rua do lazer 140 pilares').
+    return any(n in q for n in nomes) or (len(nucleo) >= 8 and any(set(nucleo.split()) <= set(n.split()) for n in nomes))
+
+
+def tipo_busca(consulta, marca, nomes=frozenset()):
     q = consulta.lower()
-    if any(t in q for t in marca):
+    if any(t in q for t in marca) or (nomes and _busca_um_espaco(consulta, nomes)):
         return "Marca ou nome"
     return "Generica" if any(t in q for t in GENERICAS) else "Outras"
 
@@ -147,7 +173,7 @@ def _gsc(sessao, cfg, inicio, fim, dimensoes, limite=25000):
     return r.json().get("rows", [])
 
 
-def coletar(slug, hoje, creds=None):
+def coletar(slug, hoje, creds=None, nomes=frozenset()):
     """{'ga': [(dia, canal, [sessoes, engajadas, novos])], 'gsc': [(dia, tipo, imp, cliques, pos)],
     'top': [[consulta, imp, cliques, posicao, tipo]], 'erros': [...]}"""
     from google.auth.transport.requests import AuthorizedSession
@@ -160,7 +186,7 @@ def coletar(slug, hoje, creds=None):
     except Exception as erro:  # noqa: BLE001 - aba sai sem o bloco de visitas
         dados["erros"].append(f"GA4: {erro}")
     try:
-        por_busca = [(datetime.date.fromisoformat(r["keys"][0]), tipo_busca(r["keys"][1], cfg["marca"]),
+        por_busca = [(datetime.date.fromisoformat(r["keys"][0]), tipo_busca(r["keys"][1], cfg["marca"], nomes),
                       r["impressions"], r["clicks"], r["position"])
                      for r in _gsc(sessao, cfg, INICIO_GSC, hoje, ["date", "query"])]
         totais = _gsc(sessao, cfg, INICIO_GSC, hoje, ["date"])
@@ -168,7 +194,7 @@ def coletar(slug, hoje, creds=None):
         top = _gsc(sessao, cfg, hoje - datetime.timedelta(days=DIAS_TOP), hoje, ["query"], 5000)
         dados["consultas"] = [(r["keys"][0], r["impressions"], r["clicks"]) for r in top]
         dados["top"] = [[r["keys"][0], r["impressions"], r["clicks"], round(r["position"], 1),
-                         tipo_busca(r["keys"][0], cfg["marca"])] for r in sorted(top, key=lambda r: -r["impressions"]) if fl.seguro(r["keys"][0])][:TOP_BUSCAS]
+                         tipo_busca(r["keys"][0], cfg["marca"], nomes)] for r in sorted(top, key=lambda r: -r["impressions"]) if fl.seguro(r["keys"][0])][:TOP_BUSCAS]
     except Exception as erro:  # noqa: BLE001
         dados["erros"].append(f"Search Console: {erro}")
     for e in dados["erros"]:

@@ -299,7 +299,7 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
     p.linha(ctl)
     p.linha(fl.CartaoVivo("Cadastros no periodo", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
             fl.CartaoVivo("Perfis completos", flt.soma_p("perfis", "A"), flt.soma_p("perfis", "B")),
-            fl.CartaoVivo("Primeiras acoes registradas no app", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
+            fl.CartaoVivo("Primeiras acoes no app (eventos, nao pessoas)", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
             fl.CartaoVivo("Perfis completos por cadastro", flt.taxa("perfis", "A"), flt.taxa("perfis", "B"),
                           dp.FMT_PCT))
     p.linha(fl.evolucao("Cadastros no periodo A", flt, "cadastros", "perfil", perfis,
@@ -309,7 +309,7 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
             fl.SerieViva("Primeiras acoes no periodo A", ["Dia", "Primeiras acoes"],
                          [[F(flt.sequencia()), F(flt.por_ponto("acoes", perfil=False))]],
                          n_linhas=fl.MAX_PONTOS, formato_dominio=dp.FMT_DIA, rotulos=False, altura=320,
-                         subtitulo="Por dia ou semana · todos os perfis (o evento ainda nao traz o perfil)"))
+                         subtitulo="Primeira coisa relevante feita no app: clicar num evento, ler noticia, comecar curso, baixar material, curtir, mandar mensagem · conta eventos: so desde 23/11 o app diz quem fez"))
     # Visitas ficam no bloco do GA4 (com periodo); aqui so o estado dos membros.
     p.linha(dp.Cartao("Membros (hoje)", m["membros"]),
             dp.Cartao("Voltaram nos ultimos 30 dias (1+ dia depois do cadastro)", m["voltaram_30d"]),

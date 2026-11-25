@@ -80,7 +80,8 @@ def funil(leads):
 
 DIAS_PARADO = 7  # card em aberto ha mais que isso no mesmo estagio conta como parado
 SEM_DONO = "Sem executivo"
-CAB_EXECUTIVOS = ["Executivo", "Agendamentos", "Em aberto", "Parados 7+ dias", "Dias parado (mediana)",
+# Revisao do Bruno (25/11): o card nasce quando o lead ABRE a agenda; nao e agendamento.
+CAB_EXECUTIVOS = ["Executivo", "Cards", "Sem reuniao nem perda", "Parados 7+ dias", "Dias parado (mediana)",
                   "Tiveram reuniao", "Ganho", "Perdido", "% virou reuniao"]
 
 
@@ -132,8 +133,9 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None, sem_contato=0):
 
     p.linha(fl.CartaoVivo("Leads disparados", *ab("disparados")),
             fl.CartaoVivo("Clicaram ou responderam", *ab("engajaram")),
-            fl.CartaoVivo("Reunioes (contatos deste periodo)", *ab("reuniao")),
-            fl.CartaoVivo("Abriram a agenda", *ab("agenda")))
+            fl.CartaoVivo("Abriram a agenda", *ab("agenda")),
+            fl.CartaoVivo("Viraram card no HubSpot", *ab("card")),
+            fl.CartaoVivo("Reunioes (contatos deste periodo)", *ab("reuniao")))
     d, e, ag, r = (flt.soma_p(k) for k in ("disparados", "engajaram", "agenda", "reuniao"))
     p.linha(fl.FunilVivo("Do disparo ao ganho (periodo A)", flt, FUNIL_VIVO, altura=360,
                          subtitulo="% sobre os contatados · abrir a agenda nao e reuniao marcada: so conta a reuniao que aconteceu"),
@@ -144,12 +146,15 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None, sem_contato=0):
     if executivos:
         cards = sum(r[1] for r in executivos)
         sem_dono = next((r[1] for r in executivos if r[0] == SEM_DONO), 0)
-        p.linha(dp.Cartao("Agendamentos da Brenda no HubSpot", cards),
-                dp.Cartao("Sem executivo dono", sem_dono),
-                dp.Cartao(f"Em aberto parados {DIAS_PARADO}+ dias", sum(r[3] for r in executivos)),
+        p.linha(dp.Cartao("Cards da Brenda no HubSpot (desde o inicio)", cards),
+                dp.Cartao("Cards sem executivo dono (hoje)", sem_dono),
+                dp.Cartao(f"Cards no mesmo estagio ha {DIAS_PARADO}+ dias (hoje)", sum(r[3] for r in executivos)),
                 dp.Cartao("Reunioes da Brenda (desde o inicio)", sum(r[5] for r in executivos)))
-        p.linha(dp.Tabela("Retorno de cada executivo aos agendamentos da Brenda (hoje, sem filtro)", CAB_EXECUTIVOS,
-                          executivos, formatos=[None] + [dp.FMT_INT] * 7 + [dp.FMT_PCT], gradiente=[3]))
+        # O card nasce quando o lead ABRE a agenda (robo da Automatize), nao quando marca a reuniao.
+        p.linha(dp.Tabela(f"Cards da Brenda por executivo (desde o inicio) · parado = {DIAS_PARADO}+ dias no mesmo estagio",
+                          CAB_EXECUTIVOS,
+                          executivos, formatos=[None] + [dp.FMT_INT] * 7 + [dp.FMT_PCT], gradiente=[3],
+                          spans=[2, 1, 2, 1, 2, 1, 1, 1, 1]))
     p.linha(fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO, maturacao=fl.MATURACAO_DIAS))
     p.linha(fl.evolucao("Leads disparados no periodo A", flt, "disparados", "canal", canais,
                         subtitulo="Por dia ou semana (filtro 'Agrupar por'), empilhado por canal"))

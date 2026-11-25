@@ -17,6 +17,7 @@ import dashboard_painel as dp
 import painel_filtros as fl
 import pf_cruzamentos
 import pf_produtor
+import pf_cupons
 import web_visitas
 
 SECRETS_FILE = os.path.expanduser("~/.brada-secrets/automatize-primeira-fila-dados.env")
@@ -41,6 +42,7 @@ PERFIS_TESTE = [
     "c01d2718-3124-4aac-9f8e-3cdcb74527be",
     "1eb9c0d9-7467-45b7-968f-02b192433b21",
     "9a639948-96be-48fb-b0ad-1e3c3dbef83c",  # teste criado em 19/11 com 1 espaco no guia (auditoria de 24/11)
+    "f1066b49-8d0c-412a-86d1-5027447e428d",  # "QA Teste Primeira Fila (nao reservar)": 2 espacos pausados, 2 reservas de teste (25/11)
 ]
 
 
@@ -184,9 +186,12 @@ MUDANCA_CLIQUES = "16/11"
 CANAIS = {"whatsapp": "WhatsApp", "email": "E-mail", "e-mail": "E-mail", "instagram": "Instagram"}
 
 
+SEM_CONTATO = "Ainda sem contato"  # captado pelo Hunter, nenhuma mensagem enviada: nao e um canal (25/11)
+
+
 def _canal(c):
     if not c:
-        return "Nao abordado"
+        return SEM_CONTATO
     return CANAIS.get(str(c).strip().lower(), str(c).strip().capitalize())
 
 
@@ -293,6 +298,10 @@ def coletar(conn):
     cur.execute(BASE + pf_cruzamentos.CONSULTA_OFERTA, {"teste": PERFIS_TESTE})
     dados["oferta_local"] = cur.fetchall()
     dados.update(pf_produtor.coletar(cur))
+    dados["cupons"] = pf_cupons.coletar(cur, BASE, {"teste": PERFIS_TESTE})
+    cur.execute(BASE + "select name, concat_ws(' ', endereco, bairro, cidade) from espacos_reais where revisao_status = 'publicado'",
+                {"teste": PERFIS_TESTE})
+    dados["espacos_nomes"] = cur.fetchall()
     return dados
 
 
@@ -318,7 +327,7 @@ def montar_painel(dados, agora, web=None):
     hl = linhas_hunter(dados.get("hunter_linhas", []))
     dl = linhas_demanda(dados.get("demanda_linhas", []))
     cidades = list(dict.fromkeys(BASE_HUNTER.opcoes(hl, "cidade") + BASE_DEMANDA.opcoes(dl, "cidade"))) or ["sem cidade"]
-    canais = BASE_HUNTER.opcoes(hl, "canal") or ["Nao abordado"]
+    canais = BASE_HUNTER.opcoes(hl, "canal") or [SEM_CONTATO]
     ctl = fl.controles(ABA, hoje, [fl.campo_lista("cidade", "Cidade", cidades, span=2),
                                    fl.campo_lista("categoria", "Categoria do espaco",
                                                   BASE_HUNTER.opcoes(hl, "categoria"), span=2),
@@ -350,7 +359,9 @@ def montar_painel(dados, agora, web=None):
                  fl.evolucao("Cliques nos espacos do guia no periodo A", fd, "cliques", "cidade", cidades[:6],
                              subtitulo="Por dia ou semana, empilhado pelas 6 cidades com mais volume"))
     pl, resumo_produtor = pf_produtor.blocos(painel, ctl, dados)
-    pf_cruzamentos.blocos(painel, fh, canais, dados.get("oferta_local", []), (web or {}).get("consultas", []))
+    pf_cruzamentos.blocos(painel, fh, [c for c in canais if c != SEM_CONTATO] or canais[:1],
+                          dados.get("oferta_local", []), (web or {}).get("consultas", []))
+    pf_cupons.blocos(painel, dados.get("cupons", []), hoje)
     painel.linha(dp.Rosca("Espacos cadastrados (foto de hoje)", [
                      ("No ar", e["no_ar"]), ("Em revisao", e["em_revisao"]),
                      ("Pausados ou ocultos", e["cadastrados"] - e["no_ar"] - e["em_revisao"])]),
@@ -386,7 +397,8 @@ def main():
 
     tabs = {"raw_primeira_fila_diario": (HEADER_DIARIO, dados["diario"])}
     sync.pii_guard(tabs)
-    painel, resumo, bases = montar_painel(dados, now, web_visitas.coletar("pf", now.date()))
+    nomes = web_visitas.nomes_de_espaco(dados.get("espacos_nomes", []))
+    painel, resumo, bases = montar_painel(dados, now, web_visitas.coletar("pf", now.date(), nomes=nomes))
 
     if args.dry_run:
         print("  resumo:", resumo)
