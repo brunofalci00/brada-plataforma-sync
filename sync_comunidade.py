@@ -33,6 +33,11 @@ COMUNIDADE_SA_FILE = os.environ.get(
 
 DIA_MS = 86_400_000
 
+# Primeiro dia com dado de cada fonte que entra na comparacao A x B. Periodo B que comeca antes
+# disso nao compara: sairia contra zero ou contra so parte dos dias (auditoria de 26/11).
+INICIO_GA = datetime.date(2026, 11, 1)  # propriedade 544471428: primeira sessao em 01/11
+INICIO_ACOES = datetime.date(2026, 11, 3)  # primeiro evento first_relevant_action
+
 HEADER_DIARIO = ["dia", "cadastros", "primeiras_acoes", "perfis_completos"]
 
 
@@ -124,6 +129,14 @@ def _taxa(parte, todo):
     return parte / todo if todo else 0
 
 
+def perfil_completo(usuario):
+    """Conta que completou o perfil: terminou a identificacao inicial (`onboardingCompleted`).
+    O evento profile_completed (details.from_modal) e disparado por esse mesmo modal, mas sai sem userId,
+    so existe desde 04/11 e repete: bateu 82 eventos contra 79 contas no periodo por acaso. O documento
+    da conta vale para todo o historico e conta 1 por pessoa."""
+    return usuario.get("onboardingCompleted") is True
+
+
 def calcular(dados, agora_ms):
     reais = [u for u in dados["users"] if not e_equipe(u)]
     papeis = collections.Counter(u.get("role") for u in reais)
@@ -154,7 +167,7 @@ def calcular(dados, agora_ms):
         "idealizador": papeis.get("idealizador", 0),
         "incentivador": papeis.get("incentivador", 0),
         "viabilizador": papeis.get("viabilizador", 0),
-        "onboarding": _taxa(sum(1 for u in reais if u.get("onboardingCompleted") is True), len(reais)),
+        "onboarding": _taxa(sum(1 for u in reais if perfil_completo(u)), len(reais)),
         "quiz": sum(1 for u in reais if u.get("impactQuizCompleted") is True),
         "tour": sum(1 for u in reais if u.get("tourStatus") == "completed"),
         "login_7d": sum(1 for a in auth if dias_desde(a, "lastLoginAt") <= 7),
@@ -188,20 +201,19 @@ def resumo_ga(ga):
 
 
 def diario(dados):
+    """[dia, cadastros, primeiras_acoes, perfis_completos]. Perfil completo conta a conta no dia do
+    cadastro (ver perfil_completo), nao o evento profile_completed."""
     contagem = collections.defaultdict(lambda: [0, 0, 0])
     for u in dados["users"]:
         if not e_equipe(u):
             dia = _texto_data(u.get("createdAt"))[:10]
             if dia:
                 contagem[dia][0] += 1
+                contagem[dia][2] += perfil_completo(u)
     for e in dados["activation_events"]:
         dia = _texto_data(e.get("timestamp"))[:10]
-        if not dia:
-            continue
-        if e.get("event") == "first_relevant_action":
+        if dia and e.get("event") == "first_relevant_action":
             contagem[dia][1] += 1
-        elif e.get("event") == "profile_completed":
-            contagem[dia][2] += 1
     return [[d, *v] for d, v in sorted(contagem.items())]
 
 
@@ -273,15 +285,14 @@ def primeiras_acoes(dados):
 
 
 def linhas_base(dados):
-    """Cada evento na data em que aconteceu, pelo perfil. Os eventos nao trazem o membro, entao nao
-    da para seguir a mesma pessoa do cadastro a primeira acao: sao contagens do periodo, nao coorte."""
+    """Cadastro e perfil completo saem da conta, no dia do cadastro: "perfis completos por cadastro" e
+    a taxa de quem se cadastrou no periodo. Primeira acao fica na data do evento (antes de 23/11 o evento
+    nao traz o membro, entao nao da para seguir a pessoa): contagem do periodo, nao coorte."""
     def registros():
         for u in dados["users"]:
             if not e_equipe(u):
-                yield _dia(u.get("createdAt")), {"perfil": _perfil(u.get("role"))}, {"cadastros": 1}
-        for e in dados["activation_events"]:
-            if e.get("event") == "profile_completed":
-                yield _dia(e.get("timestamp")), {"perfil": _perfil(e.get("role"))}, {"perfis": 1}
+                yield (_dia(u.get("createdAt")), {"perfil": _perfil(u.get("role"))},
+                       {"cadastros": 1, "perfis": int(perfil_completo(u))})
         for dia, papel in primeiras_acoes(dados):
             yield dia, {"perfil": _perfil(papel)}, {"acoes": 1}
     return BASE_COM.agregar(registros())
@@ -295,12 +306,18 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
     flt = fl.Filtros(ctl, BASE_COM)
     p = dp.Painel(ABA, "Comunidade Brada · da visita a rede",
                   f"Atualizado {agora.strftime('%d/%m/%Y %H:%M')} · Firestore e Auth da Comunidade + Google Analytics"
-                  f" · sem as {m['equipe']} contas da equipe · mude as células claras abaixo")
+                  f" · sem as {m['equipe']} contas da equipe · mude as células claras abaixo"
+                  f" · periodo B antes de {INICIO_ACOES.strftime('%d/%m')} (primeiras acoes) ou de"
+                  f" {INICIO_GA.strftime('%d/%m')} (Google Analytics) fica sem comparacao")
     p.linha(ctl)
     p.linha(fl.CartaoVivo("Cadastros no periodo", flt.soma_p("cadastros", "A"), flt.soma_p("cadastros", "B")),
-            fl.CartaoVivo("Perfis completos", flt.soma_p("perfis", "A"), flt.soma_p("perfis", "B")),
-            fl.CartaoVivo("Primeiras acoes no app (eventos, nao pessoas)", flt.soma_p("acoes", "A"), flt.soma_p("acoes", "B")),
-            fl.CartaoVivo("Perfis completos por cadastro", flt.taxa("perfis", "A"), flt.taxa("perfis", "B"),
+            fl.CartaoVivo("Perfis completos (contas cadastradas no periodo)", flt.soma_p("perfis", "A"),
+                          flt.soma_p("perfis", "B")),
+            sem_b_antes(fl.CartaoVivo("Primeiras acoes no app (eventos, nao pessoas)", flt.soma_p("acoes", "A"),
+                                      flt.soma_p("acoes", "B")), ctl, INICIO_ACOES),
+            # Taxa sobre base minuscula (B de out/26 teve 2 cadastros: 100%) nao compara, como nas contagens.
+            fl.CartaoVivo("Perfis completos por cadastro", flt.taxa("perfis", "A"),
+                          f'IF({flt.soma_p("cadastros", "B")}<{fl.MIN_BASE_COMPARACAO};0;{flt.taxa("perfis", "B")})',
                           dp.FMT_PCT))
     p.linha(fl.evolucao("Cadastros no periodo A", flt, "cadastros", "perfil", perfis,
                         subtitulo="Por dia ou semana, empilhado por perfil"),
@@ -335,8 +352,27 @@ def montar_painel(m, linhas, agora, base_linhas=(), web=None):
     if ga:
         resumo.update({"comunidade_visitantes_30d": ga["ativos"], "comunidade_retorno": ga["taxa_retorno"]})
     if web is not None:
-        web_visitas.blocos(p, ctl, "comunidade", web)
+        blocos_web(p, ctl, web)
     return p, resumo
+
+
+def sem_b_antes(cartao, ctl, inicio):
+    """Cartao A x B que so compara quando o periodo B comeca no dia `inicio` ou depois. Antes disso a
+    fonte nao tinha dado: B vira 0 e o CartaoVivo deixa a comparacao vazia, em vez de comparar com zero
+    (ou com so parte dos dias). Cartao sem comparacao passa direto."""
+    if not isinstance(cartao, fl.CartaoVivo) or cartao.fb is None:
+        return cartao
+    gate = f"IF({ctl.ref('de_B')}<{fl.serial(inicio)};0;{cartao.fb})"
+    return fl.CartaoVivo(cartao.titulo, cartao.fa, gate, cartao.formato)
+
+
+def blocos_web(p, ctl, web):
+    """Visitas (GA4) e Busca no Google. Os cartoes do GA4 nao comparam com periodo B antes de
+    INICIO_GA; a Busca no Google tem dado desde 09/2026 e segue comparando normal."""
+    n = len(p.linhas)
+    web_visitas.blocos(p, ctl, "comunidade", {**web, "gsc": [], "top": []})
+    p.linhas[n:] = [[sem_b_antes(c, ctl, INICIO_GA) for c in linha] for linha in p.linhas[n:]]
+    web_visitas.blocos(p, ctl, "comunidade", {**web, "ga": []})
 
 
 def main():

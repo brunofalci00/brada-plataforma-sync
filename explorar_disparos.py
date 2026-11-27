@@ -113,14 +113,23 @@ MIN_ENVIOS_TAXA = 20  # abaixo disso a taxa engana (2 envios entregues = "100% d
 NAO_MEDE = {("WhatsApp", "abriram"), ("WhatsApp", "voltou")}
 
 
+def fixos_da_taxa(dimensao, v, etapa):
+    """Abertura so existe no e-mail: numerador e denominador ficam no canal E-mail (auditoria de 26/11: na
+    Elaboracao o denominador levava os WhatsApps e a abertura saia menor). As outras taxas usam todos os canais."""
+    return dict({"canal": "E-mail"} if etapa == "abriram" else {}, **{dimensao: v})
+
+
 def taxas_vivas(flt, dimensao, valores):
-    """Taxas por valor da dimensao; valor com menos de MIN_ENVIOS_TAXA envios no periodo A fica vazio."""
-    def cel(formula, v, etapa):
+    """Taxas por valor da dimensao; valor com menos de MIN_ENVIOS_TAXA envios (e-mails, na abertura) no
+    periodo A fica vazio."""
+    def cel(v, etapa, formula=None):
         if (v, etapa) in NAO_MEDE:
             return ""
-        return F(f'IF({flt.soma_p("envios", **{dimensao: v})}<{MIN_ENVIOS_TAXA};"";{formula})')
-    linhas = [[nome] + [cel(flt.taxa(etapa, **{dimensao: v}), v, etapa) for v in valores] for nome, etapa in TAXAS]
-    return linhas + [["Voltou (e-mail invalido)"] + [cel(bounce(flt, **{dimensao: v}), v, "voltou")
+        fixos = fixos_da_taxa(dimensao, v, etapa)
+        formula = formula or flt.taxa(etapa, **fixos)
+        return F(f'IF({flt.soma_p("envios", **fixos)}<{MIN_ENVIOS_TAXA};"";{formula})')
+    linhas = [[nome] + [cel(v, etapa) for v in valores] for nome, etapa in TAXAS]
+    return linhas + [["Voltou (e-mail invalido)"] + [cel(v, "voltou", bounce(flt, **{dimensao: v}))
                                                      for v in valores]]
 
 
@@ -144,10 +153,12 @@ def montar_painel(linhas_base, agora, foto=(), saude=None):
             fl.CartaoVivo("Conversao final", flt.taxa("resultado", "A"), flt.taxa("resultado", "B"), dp.FMT_PCT))
     p.linha(fl.FunilVivo("Funil do período A", flt, FUNIL,
                          "Conversao final: reuniao (Incentivador), assinatura do AprovAI (Elaboracao) ou cadastro "
-                         "(Plataforma), 1 por contato · WhatsApp entregue conta como aberto · escolha uma frente no filtro"),
+                         "(Plataforma), 1 por contato · WhatsApp nao mede entrega nem abertura: conta como "
+                         "entregue e so entra em Abriram se respondeu · escolha uma frente no filtro"),
             fl.SerieViva("Taxas por frente no período A", ["Taxa"] + [n for _, n in FRENTES],
                          taxas_vivas(flt, "frente", [n for _, n in FRENTES]),
-                         formato=dp.FMT_PCT, subtitulo="% das mensagens de cada frente · vazio = menos de 20 no periodo"))
+                         formato=dp.FMT_PCT, subtitulo="% das mensagens de cada frente · abertura = e-mails abertos "
+                                                       "sobre e-mails enviados · vazio = menos de 20 no periodo"))
     p.linha(fl.comparacao_ab("Período A contra período B", flt, FUNIL, maturacao=fl.MATURACAO_DIAS))
     p.linha(fl.SerieViva("Envios no período A", ["Dia"] + [n for _, n in FRENTES],
                          [[F(flt.sequencia())] + [F(flt.por_ponto("envios", frente=n)) for _, n in FRENTES]],
@@ -232,7 +243,7 @@ def tabela_fontes(envios, hoje):
 
 
 def linhas_fila(envios, fila, hoje, janela=28):
-    """Tabela da Visao Geral: [frente, envios por dia na janela, enviados hoje, na fila, canal da fila]."""
+    """Tabela da Visao Geral: [frente, envios por dia na janela, enviados hoje, pessoas na fila, canal da fila]."""
     inicio = hoje - datetime.timedelta(days=janela - 1)
     out = []
     for m, nome in FRENTES:
@@ -279,7 +290,7 @@ def resumo_saude(envios, hoje):
 def tabela_saude(envios, hoje, frentes=None, fila=None,
                  titulo=f"A Brenda está disparando? (hoje, sem filtro · PARADA = mais de {LIMITE_PARADA} dias uteis sem envio)"):
     cab = ["Frente", "Ultimo envio", "Dias uteis sem envio", "Envios em 7 dias"] + (
-        ["Esperando na fila"] if fila is not None else []) + ["Situacao"]
+        ["Pessoas esperando na fila"] if fila is not None else []) + ["Situacao"]
     return dp.Tabela(titulo, cab, linhas_saude(envios, hoje, frentes, fila),
                      formatos=[None, None, dp.FMT_INT, dp.FMT_INT] + ([dp.FMT_INT] if fila is not None else []) + [None],
                      gradiente=[2])
@@ -298,7 +309,8 @@ def componentes_visao_geral(envios, fila, hoje):
                   subtitulo="As três frentes juntas · para uma frente só, use o filtro do topo")),
         (tabela_fontes(envios, hoje),),
         (dp.Tabela("Fila de envio hoje (sem filtro)",
-                   ["Frente", "Mensagens por dia (28d)", "Enviadas hoje", "Esperando na fila", "Canal da fila"],
+                   ["Frente", "Mensagens por dia (28d)", "Enviadas hoje", "Pessoas esperando na fila",
+                    "Canal da fila"],
                    linhas_fila(envios, fila, hoje),
                    formatos=[None, {"type": "NUMBER", "pattern": "0.0"}, dp.FMT_INT, dp.FMT_INT, None],
                    gradiente=[3]),),

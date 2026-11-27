@@ -16,13 +16,21 @@ import dashboard_painel as dp
 
 ABA = "Visão Geral"
 
+# Reuniao da Brenda = lead que ELA disparou, cujo card (ligado ao lead no banco da Automatize) chegou a reuniao:
+# o funil por lead da aba Incentivador. Auditoria 26/11: `incentivador_cards_reuniao` soma tambem o card sem
+# contato ligado, e o unico caso (card de 25/11) nao veio do fluxo dela: nasceu ja em "[EV] Reuniao
+# Agendada" (stage 1246562476) pela integracao da Automatize, sem lead no banco e sem disparo; os outros 181
+# cards nasceram em "[SDR] Inbound", quando o lead abriu a agenda. Contado assim, ele aparecia como reuniao
+# sobre quem clicou (1 reuniao, 0,44% dos 229). Ele segue em "Reunioes: todas as origens".
+CHAVE_REUNIAO_BRENDA = "incentivador_reuniao"
+
 # (publico, produto, periodo, [(nome da etapa, chave do resumo)]). Os 3 publicos nao se misturam; cada
 # funil tem a propria profundidade e o proprio periodo, entao as linhas nao se comparam entre si.
 PRODUTOS = [
-    # Reuniao: mesma contagem do cartao "Reunioes: vindas da Brenda" (cards que chegaram a reuniao).
+    # Reuniao: mesma contagem do cartao "Reunioes: vindas da Brenda" (CHAVE_REUNIAO_BRENDA, ver ali o criterio).
     ("Incentivador", "Brenda -> incentivadores", "desde 01/09",
      [("disparados", "incentivador_disparados"), ("clicaram/responderam", "incentivador_engajaram"),
-      ("reunioes", "incentivador_cards_reuniao")]),
+      ("reunioes", CHAVE_REUNIAO_BRENDA)]),
     # Decisao do Bruno (25/11): uma linha por publico, de todas as origens. O pedaco da Brenda mora na aba Brenda.
     ("Proponente plataforma", "Plataforma, todas as origens", "total",
      [("contas novas", "plataforma_novos_cadastros"), ("com projeto apto", "plataforma_novos_aptos")]),
@@ -144,7 +152,7 @@ def montar_painel(r, agora, velhas=()):
     p.linha(dp.Cartao("Projetos aptos a captar", v("plataforma_aptos")),
             dp.Cartao("Membros da Comunidade", v("comunidade_membros")),
             dp.Cartao("Reunioes: todas as origens", v("incentivador_pipeline_reuniao")),
-            dp.Cartao("Reunioes: vindas da Brenda", v("incentivador_cards_reuniao")),
+            dp.Cartao("Reunioes: vindas da Brenda", v(CHAVE_REUNIAO_BRENDA)),
             dp.Cartao("Receita do mes", v("aprovai_mrr") + v("pf_comissao_mes"), dp.FMT_BRL))
     linhas = [linha_produto(*prod, v) for prod in PRODUTOS]
     p.linha(dp.Tabela("Funil de cada produto (o % de cada etapa e sobre a anterior; cada linha tem o seu periodo)",

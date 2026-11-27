@@ -5,8 +5,8 @@ elaboracao de projeto, rumo ao AprovAI) e `aprovado_selfservice` (proponentes co
 projeto aprovado, rumo a Plataforma). Linhas `backfill-*` sao carga retroativa e
 ficam fora.
 
-PII (nome, e-mail, telefone) nunca e lida aqui: so lead_id, data, canal e
-marcas de etapa.
+PII (nome, e-mail, telefone) nunca e lida aqui: so lead_id, data, canal,
+marcas de etapa e a `origem` do lead (de onde ele veio, para a fonte).
 """
 
 import datetime
@@ -116,23 +116,43 @@ def por_dia(lista, hoje, n=30):
     return [[d.strftime("%d/%m"), c["email"], c["whatsapp"]] for d, c in cont.items()]
 
 
+# Leads de teste que a Automatize disparou de verdade e que ficam fora do painel (por id, nunca por nome).
+# 196aaa72...: lead "Teste Lead" (origem do cadastro), 1 e-mail da Elaboracao em 28/08 (auditoria de 26/11).
+LEADS_TESTE = ("196aaa72-139e-4232-8a34-fe8419f643de",)
+
+# Lead sem fonte_slug cuja `leads.origem` diz de onde veio. kiwify-aprovai: planilha de compradores da
+# Kiwify importada em 18/11 (887 leads); ~240 envios da Elaboracao saiam como "sem fonte".
+FONTE_POR_ORIGEM = {"kiwify-aprovai": "Kiwify (planilha importada)"}
+
+# Le so `origem` de dados.leads (nunca nome, e-mail ou telefone).
 CONSULTA_FRENTES = """
-    select modalidade, dia, canal, fonte_slug,
-           aberto_em is not null, clicou_em is not null, respondeu_em is not null,
-           (visitou_agenda_em is not null or clicou_agendar_em is not null),
-           coalesce(card_hubspot_em::date >= dia, false), coalesce(cadastro_em::date >= dia, false),
-           bounce_em is not null, lead_id
-    from dados.envios
-    where modalidade in (%s, %s, %s) and dia is not null
-      and coalesce(origem_evento, '') not like 'backfill%%'
+    select e.modalidade, e.dia, e.canal, e.fonte_slug,
+           e.aberto_em is not null, e.clicou_em is not null, e.respondeu_em is not null,
+           (e.visitou_agenda_em is not null or e.clicou_agendar_em is not null),
+           coalesce(e.card_hubspot_em::date >= e.dia, false), coalesce(e.cadastro_em::date >= e.dia, false),
+           e.bounce_em is not null, l.origem, e.lead_id
+    from dados.envios e
+    left join dados.leads l on l.id = e.lead_id
+    where e.modalidade in (%s, %s, %s) and e.dia is not null
+      and coalesce(e.origem_evento, '') not like 'backfill%%'
+      and e.lead_id::text <> all(%s)
 """
 CAMPOS_FRENTES = ("modalidade", "dia", "canal", "fonte") + MARCAS
 
 # Plano do alocador no ultimo dia planejado: o que saiu e o que ficou esperando, por frente e canal.
+# O plano tem uma VAGA por lead x canal (o mesmo lead pode estar no e-mail e no WhatsApp): a 4a coluna
+# conta vagas, a 5a conta cada lead uma vez so (na 1a vaga dele entre as enviadas ou entre as que esperam).
+# Em 27/11 a Elaboracao tinha 1.405 vagas esperando para 838 pessoas.
 CONSULTA_FILA = """
-    select modalidade, status, canal, count(*)
-    from dados.plano_disparo
-    where dia = (select max(dia) from dados.plano_disparo)
+    with p as (
+        select modalidade, status, canal,
+               row_number() over (partition by modalidade, lead_id, coalesce(status, '') like 'enviado%%'
+                                  order by canal) = 1 as primeira
+        from dados.plano_disparo
+        where dia = (select max(dia) from dados.plano_disparo)
+    )
+    select modalidade, status, canal, count(*), count(*) filter (where primeira)
+    from p
     group by 1, 2, 3
 """
 
@@ -141,8 +161,18 @@ def envios_frentes(conn):
     """Envios das tres frentes, sem lead_id: modalidade, dia, canal, fonte, marcas de etapa e `lead_hash`
     (o mesmo pseudonimo de sync.hash_id, para cruzar com a reuniao do Incentivador). O id cru nao sai daqui."""
     cur = conn.cursor()
-    cur.execute(CONSULTA_FRENTES, (INCENTIVADOR, ELABORACAO, APTOS))
-    return [dict(zip(CAMPOS_FRENTES, r[:-1]), lead_hash=hash_lead(r[-1])) for r in cur.fetchall()]
+    cur.execute(CONSULTA_FRENTES, (INCENTIVADOR, ELABORACAO, APTOS, list(LEADS_TESTE)))
+    return [envio_da_linha(r) for r in cur.fetchall()]
+
+
+def envio_da_linha(r):
+    """Linha da CONSULTA_FRENTES -> envio. Sem fonte_slug, a fonte vem da origem do lead quando ela e conhecida;
+    a origem em si nao sai daqui."""
+    *campos, origem, lead_id = r
+    e = dict(zip(CAMPOS_FRENTES, campos), lead_hash=hash_lead(lead_id))
+    if not e["fonte"]:
+        e["fonte"] = FONTE_POR_ORIGEM.get(origem)
+    return e
 
 
 def hash_lead(lead_id):
@@ -151,17 +181,18 @@ def hash_lead(lead_id):
 
 
 def fila_do_dia(conn):
-    """{modalidade: {"enviados": n, "na_fila": n, "canal_fila": canal mais comum entre os que esperam}}."""
+    """{modalidade: {"enviados": mensagens, "na_fila": PESSOAS esperando, "canal_fila": canal com mais vagas
+    esperando}}. `enviado_n8n` tambem saiu (antes caia na fila)."""
     cur = conn.cursor()
     cur.execute(CONSULTA_FILA)
     out = {}
-    for modalidade, status, canal, n in cur.fetchall():
+    for modalidade, status, canal, vagas, pessoas in cur.fetchall():
         f = out.setdefault(modalidade, {"enviados": 0, "na_fila": 0, "_canais": {}})
-        if status == "enviado":
-            f["enviados"] += n
+        if (status or "").startswith("enviado"):
+            f["enviados"] += vagas
         else:
-            f["na_fila"] += n
-            f["_canais"][canal or "?"] = f["_canais"].get(canal or "?", 0) + n
+            f["na_fila"] += pessoas
+            f["_canais"][canal or "?"] = f["_canais"].get(canal or "?", 0) + vagas
     for f in out.values():
         canais = f.pop("_canais")
         f["canal_fila"] = max(canais, key=canais.get) if canais else ""

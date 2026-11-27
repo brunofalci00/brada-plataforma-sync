@@ -315,6 +315,17 @@ def evolucao(titulo, flt, etapa, dimensao, valores, subtitulo=None):
 MATURACAO_DIAS = 14  # decisao de 23/11: conversao so conta lead abordado ha pelo menos 14 dias
 
 
+def titulo_ab_com_datas(titulo, flt, dias):
+    """Auditoria 26/11: a comparacao A x B recua os dois periodos `dias` dias (maturacao) e o titulo nao dizia
+    quais datas entram. Formula viva: segue as celulas de periodo do topo ('29/10 a 12/11 vs 29/09 a 13/10').
+    Formula nao passa pelo acentuar() da gravacao, por isso o texto e acentuado aqui."""
+    def janela(p):
+        de, ate = flt.periodo(p)
+        return f'TEXT({de}-{dias};"dd/mm")&" a "&TEXT({ate}-{dias};"dd/mm")'
+    texto = dp.acentuar(f"{titulo} (so contatos de {dias}+ dias, a janela recua {dias} dias): ")
+    return F(f'"{texto}"&{janela("A")}&" vs "&{janela("B")}')
+
+
 def comparacao_ab(titulo, flt, etapas, maturacao=None):
     """Tabela etapa x (A, % do topo A, B, % do topo B, A sobre B).
 
@@ -326,7 +337,7 @@ def comparacao_ab(titulo, flt, etapas, maturacao=None):
         de, ate = flt.periodo(p)  # desloca inicio e fim juntos: A e B seguem com o mesmo numero de dias
         return flt.soma(etapa, f"({de}-{maturacao})", f"({ate}-{maturacao})")
     if maturacao:
-        titulo = f"{titulo} (so contatos de {maturacao}+ dias, para dar tempo de responder)"
+        titulo = titulo_ab_com_datas(titulo, flt, maturacao)
     topo_a, topo_b = soma(etapas[0][1], "A"), soma(etapas[0][1], "B")
     linhas = []
     for nome, etapa in etapas:

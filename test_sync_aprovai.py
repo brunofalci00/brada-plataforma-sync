@@ -296,3 +296,71 @@ def test_checkout_conta_visitante_unico_por_dia_nao_abertura():
             return type("C", (), {"stream": lambda self: iter(eventos)})()
 
     assert coletar_funil_rows(Db())[0][5] == 3
+
+
+def _db_de(eventos):
+    class Doc:
+        def __init__(self, d):
+            self.d = d
+
+        def to_dict(self):
+            return self.d
+
+    docs = [Doc(e) for e in eventos]
+    return type("Db", (), {"collection": lambda self, nome: type("C", (), {"stream": lambda s: iter(docs)})()})()
+
+
+def test_planos_contratados_conta_pagante_unico_e_tira_migrado_do_kiwify():
+    """Caso real de 26/11: 4 'planos' com 2 pagantes. Mesmo cliente Asaas em dois documentos (so um com a origem)
+    e um migrado do Kiwify com data de expiracao, que passava no corte antigo."""
+    from sync_aprovai import assinantes_por_origem, resumo_pre_approvals, leads_que_assinaram
+    docs = [{"subscriptionStatus": "active", "asaasCustomerId": "cus_1", "email": "a@x.com"},
+            {"subscriptionStatus": "active", "asaasCustomerId": "cus_1", "asaasSubscriptionId": "sub_1",
+             "email": "a2@x.com", "utm_source": "ref:aprovai.brada.social", "utm_term": "lead-9"},
+            {"subscriptionStatus": "active", "asaasCustomerId": "cus_2", "email": "b@x.com"},
+            {"subscriptionStatus": "active", "migratedFromKiwify": True, "subscriptionExpiresAt": "2026-12-20",
+             "email": "c@x.com"},
+            {"subscriptionStatus": "active", "migratedFromKiwify": True, "email": "d@x.com"}]
+    origens = dict(assinantes_por_origem(docs))
+    assert origens == {"link vindo de aprovai.brada.social": 1, "Antes do rastreio (ate 23/11)": 1}
+    assert sum(origens.values()) == 2
+    assert resumo_pre_approvals(docs) == {"total_ativos_no_app": 5, "migrados_kiwify_sem_billing_asaas": 2,
+                                          "com_billing_asaas_real": 2}
+    assert leads_que_assinaram(docs) == frozenset({"lead-9"})
+    assert "utm_source" not in docs[0]  # juntar duplicados nao mexe no documento original
+
+
+def test_ja_tenho_uma_conta_nao_e_clique_em_comprar():
+    """Auditoria de 26/11: no periodo A, 3 cliques em Garantir + 1 em 'Ja tenho uma conta' e 2 compras: 50% -> 67%."""
+    from sync_aprovai import clique_de_compra, coletar_funil_rows
+    assert not clique_de_compra({"ctaId": "hero_existing_account"})
+    assert clique_de_compra({"ctaId": "hero_main_cta"})
+    ts = "2026-11-24T15:00:00Z"
+    eventos = [{"type": "cta_click", "ctaId": "hero_main_cta", "timestamp": ts}] * 3 + [
+        {"type": "cta_click", "ctaId": "hero_existing_account", "timestamp": ts},
+        {"type": "purchase_completed", "timestamp": ts}, {"type": "purchase_completed", "timestamp": ts}]
+    (r,) = coletar_funil_rows(_db_de(eventos))
+    assert r[2] == 3 and round(r[6] / r[2], 2) == 0.67
+
+
+def test_visitas_contam_pessoas_no_dia_da_primeira_visita():
+    from sync_aprovai import coletar_funil_rows
+    eventos = [{"type": "page_view", "visitorId": "v1", "timestamp": "2026-11-20T12:00:00Z"},
+               {"type": "page_view", "visitorId": "v1", "timestamp": "2026-11-20T12:05:00Z"},
+               {"type": "page_view", "visitorId": "v1", "timestamp": "2026-11-21T12:00:00Z"},  # voltou: nao repete
+               {"type": "page_view", "visitorId": "v2", "timestamp": "2026-11-21T13:00:00Z"},
+               {"type": "page_view", "visitorId": "v2", "timestamp": "2026-11-20T13:00:00Z"}]  # ordem nao importa
+    rows = coletar_funil_rows(_db_de(eventos))
+    assert [(r[0], r[1]) for r in rows] == [("2026-11-20", 2), ("2026-11-21", 0)]
+    assert sum(r[1] for r in rows) == 2  # 5 eventos, 2 pessoas
+
+
+def test_dia_do_evento_e_pelo_horario_de_brasilia():
+    import datetime
+    from sync_aprovai import coletar_funil_rows, dia_brasilia
+    assert dia_brasilia("2026-11-27T02:58:32.023Z") == "2026-11-26"  # 23h58 de Brasilia
+    assert dia_brasilia("2026-11-27T03:00:00Z") == "2026-11-27"
+    assert dia_brasilia(datetime.datetime(2026, 11, 27, 1, 0, tzinfo=datetime.timezone.utc)) == "2026-11-26"
+    assert dia_brasilia("") == "" and dia_brasilia(None) == ""
+    rows = coletar_funil_rows(_db_de([{"type": "purchase_completed", "timestamp": "2026-11-23T01:30:00Z"}]))
+    assert rows[0][0] == "2026-11-22" and rows[0][6] == 1

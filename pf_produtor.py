@@ -4,7 +4,8 @@ Fonte: visoes `dados.prospeccao_produtores` (um produtor por linha) e `dados.pro
 (um e-mail por linha), criadas pela Automatize em 19/11. So agregados saem daqui: nome, e-mail,
 telefone e lead_id ficam no banco, para a comercial consultar la.
 
-`whatsapp_resultado` nao e lido: a conta `leitura_dados` nao tem permissao na funcao que a calcula.
+`whatsapp_resultado` nao e lido: em 26/11 a consulta pela conta `leitura_dados` volta "relation does not
+exist" (a visao nao esta no esquema `dados`). Pedido aberto com a Automatize.
 """
 
 import painel_filtros as fl

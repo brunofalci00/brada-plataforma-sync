@@ -43,6 +43,7 @@ PERFIS_TESTE = [
     "1eb9c0d9-7467-45b7-968f-02b192433b21",
     "9a639948-96be-48fb-b0ad-1e3c3dbef83c",  # teste criado em 19/11 com 1 espaco no guia (auditoria de 24/11)
     "f1066b49-8d0c-412a-86d1-5027447e428d",  # "QA Teste Primeira Fila (nao reservar)": 2 espacos pausados, 2 reservas de teste (25/11)
+    "4886145d-822c-4045-8145-a5a98387dbe0",  # conta de teste do Gui (campanha da Meta, 25/11): espaco PF-2026-2798 no guia
 ]
 
 
@@ -107,10 +108,10 @@ CONSULTAS = {
 
 CONSULTA_DIARIO = BASE + """
     , dias as (
-        select clicked_at::date d, 'c' k from cliques_reais
-        union all select created_at::date, 'r' from reservas_reais
-        union all select created_at::date, 'p' from perfis_reais
-        union all select created_at::date, 'h' from dados.hunter_leads)
+        select (clicked_at at time zone 'America/Sao_Paulo')::date d, 'c' k from cliques_reais
+        union all select (created_at at time zone 'America/Sao_Paulo')::date, 'r' from reservas_reais
+        union all select (created_at at time zone 'America/Sao_Paulo')::date, 'p' from perfis_reais
+        union all select (created_at at time zone 'America/Sao_Paulo')::date, 'h' from dados.hunter_leads)
     select d, count(*) filter (where k = 'c'), count(*) filter (where k = 'r'),
            count(*) filter (where k = 'p'), count(*) filter (where k = 'h')
     from dias group by d order by d"""

@@ -65,7 +65,9 @@ def _componente(painel, titulo):
 
 def test_diario_sem_equipe():
     linhas = sc.diario(_dados())
-    assert ["2026-11-03", 0, 1, 1] in linhas
+    # perfil completo conta a conta no dia do cadastro; o evento profile_completed de 03/11 nao entra
+    assert ["2026-11-03", 0, 1, 0] in linhas
+    assert ["2026-11-02", 1, 0, 1] in linhas and ["2026-10-20", 1, 0, 0] in linhas
     assert not any(l[0] == "2026-11-01" for l in linhas)
 
 
@@ -76,8 +78,9 @@ def test_por_semana_soma_cadastros_e_acoes_na_semana_certa():
 
 
 def test_base_conta_cadastro_e_eventos_por_perfil_sem_equipe():
-    dados = {"users": [{"createdAt": "2026-11-10T10:00:00", "role": "idealizador"},
-                       {"createdAt": "2026-11-10T11:00:00", "role": "admin"}],
+    dados = {"users": [{"createdAt": "2026-11-10T10:00:00", "role": "idealizador", "onboardingCompleted": True},
+                       {"createdAt": "2026-11-10T09:00:00", "role": "idealizador", "onboardingCompleted": False},
+                       {"createdAt": "2026-11-10T11:00:00", "role": "admin", "onboardingCompleted": True}],
              "activation_events": [{"event": "first_relevant_action", "timestamp": "2026-11-11T09:00:00",
                                     "role": "idealizador"},
                                    {"event": "profile_completed", "timestamp": "2026-11-11T09:00:00"},
@@ -86,8 +89,9 @@ def test_base_conta_cadastro_e_eventos_por_perfil_sem_equipe():
     por = {(l[0], l[1]): l[2:] for l in linhas}
     import painel_filtros as fl
     d10, d11 = fl.serial(datetime.date(2026, 11, 10)), fl.serial(datetime.date(2026, 11, 11))
-    assert por[(d10, "Idealizador")] == [1, 0, 0]
-    assert por[(d11, "Idealizador")] == [0, 0, 1] and por[(d11, "Sem perfil")] == [0, 1, 0]
+    assert por[(d10, "Idealizador")] == [2, 1, 0]  # 2 cadastros, 1 perfil completo, a equipe fora
+    assert por[(d11, "Idealizador")] == [0, 0, 1]
+    assert (d11, "Sem perfil") not in por  # o evento profile_completed nao conta mais
 
 
 def test_painel_comeca_pelos_controles():
@@ -179,3 +183,44 @@ def test_calcular_le_last_active_at_dos_usuarios():
              "auth": [{"localId": "u1", "createdAt": criado}, {"localId": "u2", "createdAt": criado}],
              "ga": None, **{n: [] for n in vazias}}
     assert sc.calcular(dados, agora)["voltaram_30d"] == 1
+
+
+def test_perfil_completo_vem_da_conta_e_nao_do_evento():
+    assert sc.perfil_completo({"onboardingCompleted": True})
+    assert not sc.perfil_completo({"onboardingCompleted": False}) and not sc.perfil_completo({})
+    assert not sc.perfil_completo({"onboardingCompleted": "true"})  # so booleano verdadeiro
+
+
+def test_sem_b_antes_esvazia_a_comparacao_quando_b_comeca_antes_da_fonte():
+    import painel_filtros as fl
+    ctl = fl.controles(sc.ABA, AGORA_DT.date())
+    cartao = sc.sem_b_antes(fl.CartaoVivo("Visitas", "A1", "B1"), ctl, sc.INICIO_GA)
+    assert cartao.fb == f"IF({ctl.ref('de_B')}<{fl.serial(sc.INICIO_GA)};0;B1)"
+    assert cartao.fa == "A1" and cartao.titulo == "Visitas"
+    sem = fl.CartaoVivo("Posicao", "A1", None)
+    assert sc.sem_b_antes(sem, ctl, sc.INICIO_GA) is sem  # cartao sem comparacao passa direto
+
+
+WEB = {"ga": [(datetime.date(2026, 11, 5), "Direto", [10, 5, 3, 0])],
+       "gsc": [(datetime.date(2026, 9, 10), "Generica", 100, 2, 5.0)],
+       "top": [], "paginas": [], "consultas": [], "erros": []}
+
+
+def test_cartoes_do_ga_nao_comparam_antes_de_01_11_e_busca_segue_comparando():
+    import painel_filtros as fl
+    m = sc.calcular(_dados(), AGORA)
+    painel, _ = sc.montar_painel(m, [], AGORA_DT, sc.linhas_base(_dados()), WEB)
+    serial = str(fl.serial(sc.INICIO_GA))
+    ga = [_componente(painel, t) for t in ("Visitas medidas pelo Google", "Visitantes novos",
+                                            "Visitas com interacao")]
+    assert all(c.fb.startswith("IF(") and f"<{serial};0;" in c.fb for c in ga)
+    busca = _componente(painel, "Aparicoes no Google")
+    assert f"<{serial};0;" not in busca.fb  # Search Console tem dado desde 09/2026
+    acoes = _componente(painel, "Primeiras acoes no app (eventos, nao pessoas)")
+    assert f"<{fl.serial(sc.INICIO_ACOES)};0;" in acoes.fb
+    cadastros = _componente(painel, "Cadastros no periodo")
+    assert not cadastros.fb.startswith("IF(")  # cadastros existem desde 07/2026
+    taxa = _componente(painel, "Perfis completos por cadastro")
+    assert taxa.fb.startswith("IF(SUMIFS(") and f"<{fl.MIN_BASE_COMPARACAO};0;" in taxa.fb  # base B minuscula
+    titulos = [getattr(c, "titulo", "") for linha in painel.linhas for c in linha]
+    assert titulos.index("Visitas medidas pelo Google") < titulos.index("Aparicoes no Google")
