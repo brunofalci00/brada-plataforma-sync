@@ -171,6 +171,7 @@ def test_acento_so_no_texto_de_tela():
     assert dp.acentuar("Conversao final ja nao") == "Conversão final já não"
     assert dp.acentuar("Prospeccao de espacos") == "Prospecção de espaços"
     assert dp.acentuar("REUNIOES") == "REUNIÕES"
+    assert dp.acentuar("Cobrancas e anuncios ate o patrocinio") == "Cobranças e anúncios até o patrocínio"
     for intacto in ("elaboracao_engajaram", "dadosEmAtualizacao", "https://x.com/acao", "ao lado", "Taxa"):
         assert dp.acentuar(intacto) == intacto
     assert dp.acentuar(dp.Formula('=SUMIFS(A;B;"Elaboracao")')) == '=SUMIFS(A;B;"Elaboracao")'
@@ -191,3 +192,20 @@ def test_mesma_frente_tem_a_mesma_cor_em_qualquer_ordem():
     livres = dp.cores_das_series(["Taxa", "Incentivador"])
     assert livres[0] != dp.LARANJA and livres[1] == dp.LARANJA
     assert dp.cores_das_series(["E-mail + WhatsApp"]) == [dp.MARROM]
+
+
+def test_gravar_resumo_tira_chaves_aposentadas_e_mantem_as_outras():
+    import datetime
+    from unittest import mock
+    gravado = {}
+    svc = mock.MagicMock()
+    svc.spreadsheets().values().get().execute.return_value = {"values": [
+        ["elaboracao_cadastros", 1, "2026-11-23 14:51"], ["incentivador_cards", 186, "2026-11-26 16:04"],
+        ["brenda_x", 5, "2026-11-26 16:04"]]}
+    svc.spreadsheets().values().update.side_effect = lambda **kw: gravado.update(kw) or mock.MagicMock()
+    sh = mock.MagicMock()
+    sh.worksheet.return_value.isSheetHidden = True
+    dp.gravar_resumo(sh, svc, "id", {"incentivador_agenda": 186}, datetime.datetime(2026, 11, 27, 9, 0))
+    chaves = [r[0] for r in gravado["body"]["values"] if r[0]]
+    assert chaves == ["chave", "brenda_x", "incentivador_agenda"]
+

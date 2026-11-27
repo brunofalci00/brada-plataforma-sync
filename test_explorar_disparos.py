@@ -95,6 +95,39 @@ def test_fonte_do_banco_nao_injeta_formula():
     assert ex.fontes(linhas) == ["salic"]
 
 
+def test_abertura_por_frente_e_so_email_sobre_email():
+    """Auditoria de 26/11: abertura = e-mails abertos / e-mails enviados; WhatsApp fora do denominador."""
+    flt = ex.Filtros(ex.controles(AGORA.date(), ["salic"]))
+    linhas = {l[0]: l[1:] for l in ex.taxas_vivas(flt, "frente", ["Elaboracao"])}
+    abertura, entrega = str(linhas["Abertura"][0]), str(linhas["Entrega"][0])
+    assert abertura.count('"E-mail"') == 3  # piso de 20, numerador e denominador
+    assert '"E-mail"' not in entrega  # as outras taxas seguem o filtro de canal
+    canal = {l[0]: l[1:] for l in ex.taxas_vivas(flt, "canal", ["E-mail", "WhatsApp"])}
+    assert canal["Abertura"][1] == "" and '"E-mail"' in str(canal["Abertura"][0])
+
+
+def test_rotulos_dizem_o_que_o_numero_conta():
+    textos = []
+    p = ex.montar_painel([[46329, "Incentivador", "E-mail", "salic", 2, 2, 1, 0, 0, 0]], AGORA,
+                         ex.componentes_visao_geral([], {}, AGORA.date()), ex.tabela_saude([], AGORA.date(), fila={}))
+    for linha in p.linhas:
+        for c in linha:
+            textos += [str(getattr(c, "titulo", "")), str(getattr(c, "subtitulo", ""))]
+            textos += [str(x) for x in getattr(c, "cabecalho", None) or getattr(c, "colunas", None) or []]
+    tudo = " ".join(textos)
+    assert "WhatsApp entregue conta como aberto" not in tudo  # WhatsApp nunca tem aberto_em no banco
+    assert "so entra em Abriram se respondeu" in tudo
+    assert "Esperando na fila" not in tudo and "Pessoas esperando na fila" in tudo
+
+
+def test_kiwify_vira_fonte_com_nome_na_base_e_na_tabela():
+    linhas = ex.base([_e(sdr.ELABORACAO, D(2026, 11, 20), fonte="Kiwify (planilha importada)")])
+    assert linhas[0][3] == "Kiwify (planilha importada)" and ex.fontes(linhas) == ["Kiwify (planilha importada)"]
+    tabela = ex.linhas_fontes([dict(_e(sdr.ELABORACAO, D(2026, 11, 20), fonte="Kiwify (planilha importada)"),
+                                    lead_hash="k")], D(2026, 11, 25))
+    assert tabela[0][:2] == ["Elaboracao", "Kiwify (planilha importada)"]
+
+
 def test_saude_marca_frente_parada_por_dias_uteis():
     import sdr_automatize as s
     hoje = datetime.date(2026, 11, 18)  # quarta

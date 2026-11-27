@@ -46,11 +46,28 @@ def test_pipeline_hubspot_conta_reuniao_por_quem_trabalha():
     assert si.pipeline_hubspot(hs) == [["Agendados pela Brenda", 123, 1], ["Trazidos pelos executivos", 656, 2]]
 
 
+def test_pipeline_hubspot_inclui_sem_origem_para_bater_com_o_total():
+    """Auditoria 26/11: 145 reunioes no cartao, 139 no grafico (6 deals com trabalhado_por vazio)."""
+    hs = {"total_automatize": 183, "total_executivo": 658, "total_sem_origem": 12,
+          "rows": [["1", "x", "Automatize"], ["2", "y", "Executivo Brada"], ["3", "z", "(vazio)"], ["4", "w", "(vazio)"]]}
+    linhas = si.pipeline_hubspot(hs)
+    assert linhas[-1] == ["Sem origem (campo vazio no HubSpot)", 12, 2]
+    assert sum(l[2] for l in linhas) == len(hs["rows"])
+
+
+def test_comparacao_ab_mostra_as_datas_dos_dois_periodos_no_titulo():
+    hs = {"total_automatize": 1, "total_executivo": 2, "rows": []}
+    painel, _, _ = si.montar_painel(_leads(), hs, datetime.datetime(2026, 11, 12, 9))
+    titulo = next(c.titulo for linha in painel.linhas[1:] for c in linha if "contra período B" in c.titulo)
+    assert titulo.startswith('="Período A contra período B (só contatos de 14+ dias')
+    assert titulo.count('-14;"dd/mm")') == 4 and '&" vs "&' in titulo
+
+
 def test_painel_e_resumo():
     hs = {"total_automatize": 1, "total_executivo": 2, "rows": []}
     leads = _leads()
     painel, resumo, linhas = si.montar_painel(leads, hs, datetime.datetime(2026, 11, 12, 9))
-    assert resumo["incentivador_disparados"] == 5 and resumo["incentivador_cards"] == 2
+    assert resumo["incentivador_disparados"] == 5 and resumo["incentivador_agenda"] == 2
     assert painel.linhas[0][0].__class__.__name__ == "Controles"  # filtros sempre na 1a linha
     titulos = [c.titulo for linha in painel.linhas[1:] for c in linha]
     assert "Do disparo ao ganho (periodo A)" in titulos and "Conversao por semana de disparo" not in titulos
@@ -83,12 +100,12 @@ def test_painel_com_executivos_mostra_tabela_de_cobranca():
     assert any(t.startswith("Cards da Brenda por executivo") for t in titulos)
     assert not any("Agendamento" in str(t) for t in titulos)
     assert "Cards sem executivo dono (hoje)" in titulos
-    assert "Reunioes da Brenda (desde o inicio)" in titulos and "Card ate reuniao" not in titulos
+    assert "Reunioes de cards da Automatize (desde o inicio)" in titulos and "Card ate reuniao" not in titulos
     assert not any(t.startswith("A Brenda esta disparando") for t in titulos)  # alerta mora na Brenda e na Visao Geral
 
 
 def test_card_sem_contato_sai_do_funil_mas_volta_para_a_conta_de_cards():
-    """Cultivo (25/11): card da Automatize em Reuniao agendada sem contato ligado conta como reuniao da Brenda."""
+    """Card de 25/11: da Automatize em Reuniao agendada sem contato ligado conta como reuniao da Brenda."""
     import sync_incentivador as si
     ligados, sem = si.separar_cards([("l1", "d1"), (None, "d2"), ("l3", "d3")])
     assert ligados == {"l1": "d1", "l3": "d3"} and sem == ["d2"]

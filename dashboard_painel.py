@@ -80,6 +80,8 @@ _ACENTOS = {
     "servico": "serviço", "diario": "diário", "metrica": "métrica", "metricas": "métricas", "grafico": "gráfico",
     "graficos": "gráficos", "espaco": "espaço", "espacos": "espaços", "valido": "válido", "validos": "válidos",
     "invalido": "inválido", "uteis": "úteis", "util": "útil", "facil": "fácil", "invalidos": "inválidos", "rapido": "rápido", "comercio": "comércio",
+    "patrocinio": "patrocínio", "patrocinios": "patrocínios", "cobranca": "cobrança", "cobrancas": "cobranças",
+    "anuncio": "anúncio", "anuncios": "anúncios",
 }
 _PALAVRA = re.compile(r"(?<![\w@/.])[A-Za-z]+(?![\w@/])")
 
@@ -604,15 +606,24 @@ def chaves_velhas(svc, spreadsheet_id, hoje, usadas=None):
                   if str(quando)[:10] < hoje.isoformat() and (usadas is None or k in usadas))
 
 
+# Chaves que nenhum sync grava mais: saem do resumo na proxima gravacao (senao ficam para sempre,
+# com a data do ultimo dia em que alguem as gravou).
+CHAVES_APOSENTADAS = {
+    "elaboracao_cadastros",  # trocada em 23/11
+    "incentivador_cards",    # era "abriram a agenda", nao cards; virou incentivador_agenda em 27/11
+}
+
+
 def gravar_resumo(sh, svc, spreadsheet_id, valores, agora):
-    """Mescla `valores` no resumo (chaves de outros canais ficam como estao)."""
+    """Mescla `valores` no resumo (chaves de outros canais ficam como estao; aposentadas saem)."""
     import gspread
     try:
         ws = sh.worksheet(ABA_RESUMO)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=ABA_RESUMO, rows=100, cols=3)
     carimbo = agora.strftime("%Y-%m-%d %H:%M")
-    linhas = {k: [k, v, quando] for k, v, quando in _linhas_resumo(svc, spreadsheet_id)}
+    linhas = {k: [k, v, quando] for k, v, quando in _linhas_resumo(svc, spreadsheet_id)
+              if k not in CHAVES_APOSENTADAS}
     for k, v in valores.items():
         linhas[k] = [k, _numero(v), carimbo]
     corpo = [["chave", "valor", "atualizado"]] + [linhas[k] for k in sorted(linhas)]

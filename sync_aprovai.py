@@ -67,7 +67,8 @@ HEADER_ASAAS = [
     "sync_em", "payment_id_hash", "customer_id_hash", "status", "value",
     "billing_type", "date_created", "due_date", "e_teste_ou_staff",
 ]
-HEADER_FUNIL = ["data", "visualizacoes_pagina", "cliques_comprar", "leads_enviados", "fonte", "checkout_aberto",
+# Auditoria de 26/11: visitas sao PESSOAS (visitorId), cada uma no dia da primeira visita; dia pelo horario de Brasilia.
+HEADER_FUNIL = ["data", "visitantes_novos", "cliques_comprar", "leads_enviados", "fonte", "checkout_aberto",
                 "compras"]
 
 
@@ -228,15 +229,43 @@ def coletar_pre_approvals(db):
     data de inicio/expiracao real. Nao da pra arbitrar qual numero e o assinante
     'de verdade' sem o Thiago; o certo e mostrar os dois lados, nao escolher um."""
     # Sem equipe e teste (auditoria de 24/11: 14 dos 25 "ativos" eram da equipe ou de teste).
+    # Auditoria de 26/11: "Planos contratados" mostrava 4 com 2 pagantes no Asaas. Um era o mesmo cliente Asaas
+    # gravado em dois documentos (dois e-mails, mesmo asaasCustomerId) e o outro um migrado do Kiwify COM data de
+    # expiracao (passava no corte antigo). Agora: pagante unico por cliente/assinatura Asaas, e migrado do Kiwify
+    # nunca conta, tenha ou nao data.
     docs = [d for d in (x.to_dict() for x in db.collection("payment_pre_approvals").stream())
             if not is_teste_ou_staff(d)]
     return dict(resumo_pre_approvals(docs), lead_ids=leads_que_assinaram(docs), origens=assinantes_por_origem(docs))
 
 
 def _assinatura_real(d):
-    """Ativa no app e nao migrada do Kiwify sem cobranca (mesmo corte de resumo_pre_approvals)."""
-    return (d.get("subscriptionStatus") == "active"
-            and not (d.get("migratedFromKiwify") and not d.get("subscriptionExpiresAt")))
+    """Ativa no app e nao migrada do Kiwify (o migrado nao paga no Asaas, com ou sem data de expiracao)."""
+    return d.get("subscriptionStatus") == "active" and not d.get("migratedFromKiwify")
+
+
+def _chave_pagante(d):
+    """Quem paga: cliente Asaas, depois assinatura Asaas, depois e-mail. So em memoria, nunca sai daqui."""
+    for campo in ("asaasCustomerId", "asaasSubscriptionId"):
+        if d.get(campo):
+            return (campo, str(d[campo]))
+    email = str(d.get("email") or "").strip().lower()
+    return ("email", email) if email else ("doc", id(d))
+
+
+def assinaturas_reais(docs):
+    """Uma por pagante. Documentos do mesmo pagante viram um so, juntando os campos preenchidos
+    (a origem/utm pode estar so num deles). Nao altera os documentos de entrada."""
+    grupos = {}
+    for d in docs:
+        if _assinatura_real(d):
+            grupos.setdefault(_chave_pagante(d), []).append(d)
+    juntos = []
+    for grupo in grupos.values():
+        junto = {}
+        for d in grupo:
+            junto.update({k: v for k, v in d.items() if v and not junto.get(k)})
+        juntos.append(junto)
+    return juntos
 
 
 def _utm(d, campo):
@@ -251,20 +280,20 @@ def leads_que_assinaram(docs):
 
 
 def assinantes_por_origem(docs):
-    """[(utm_source, assinaturas reais)] — origem gravada pelo site desde 23/11."""
+    """[(utm_source, pagantes unicos)] — origem gravada pelo site desde 23/11."""
     def legivel(o):
         return f"link vindo de {o[4:]}" if o.startswith("ref:") else (o or "Antes do rastreio (ate 23/11)")
-    cont = Counter(legivel(_utm(d, "utm_source")) for d in docs if _assinatura_real(d))
+    cont = Counter(legivel(_utm(d, "utm_source")) for d in assinaturas_reais(docs))
     return sorted(cont.items(), key=lambda x: (-x[1], x[0]))
 
 
 def resumo_pre_approvals(docs):
+    """total_ativos_no_app = contas com acesso; com_billing_asaas_real = pagantes unicos (sem Kiwify, sem duplicado)."""
     ativos = [d for d in docs if d.get("subscriptionStatus") == "active"]
-    migrados_sem_billing = sum(1 for d in ativos if d.get("migratedFromKiwify") and not d.get("subscriptionExpiresAt"))
     return {
         "total_ativos_no_app": len(ativos),
-        "migrados_kiwify_sem_billing_asaas": migrados_sem_billing,
-        "com_billing_asaas_real": len(ativos) - migrados_sem_billing,
+        "migrados_kiwify_sem_billing_asaas": sum(1 for d in ativos if d.get("migratedFromKiwify")),
+        "com_billing_asaas_real": len(assinaturas_reais(docs)),
     }
 
 
@@ -288,34 +317,74 @@ def lead_de_teste(evento):
     return bool(cpf) and not cpf_valido(cpf)
 
 
+# Botoes que sao cta_click mas NAO levam ao checkout: login ("Ja sou Membro", "Entrar com ...") e
+# "Ja tenho uma conta" (hero_existing_account, auditoria de 26/11).
+CTA_FORA_DA_COMPRA = ("login", "existing_account")
+
+
 def clique_de_compra(evento):
-    """So o botao que leva ao checkout ("Garantir Meu Acesso"): os botoes de login tambem sao cta_click."""
-    return "login" not in str(evento.get("ctaId") or "").lower()
+    """So o botao que leva ao checkout ("Garantir Meu Acesso")."""
+    cta = str(evento.get("ctaId") or "").lower()
+    return not any(m in cta for m in CTA_FORA_DA_COMPRA)
 
 
 def _n(r, i):
     return r[i] if len(r) > i and isinstance(r[i], (int, float)) else 0
 
 
+try:
+    from zoneinfo import ZoneInfo
+    FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
+except Exception:  # sem base de fusos (tzdata) no ambiente: Brasilia e UTC-3 fixo desde 2019
+    FUSO_BRASILIA = sync.BRT
+
+
+def dia_brasilia(ts):
+    """Dia do evento pelo horario de Brasilia. O app grava ISO em UTC ("...Z"): 21h de Brasilia ja e o dia
+    seguinte em UTC, entao cortar a string jogava o fim da noite no dia errado (auditoria de 26/11)."""
+    if isinstance(ts, datetime.datetime):
+        dt = ts
+    else:
+        txt = str(ts or "").strip()
+        if not txt:
+            return ""
+        try:
+            dt = datetime.datetime.fromisoformat(txt.replace("Z", "+00:00"))
+        except ValueError:
+            return txt[:10]
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(FUSO_BRASILIA).date().isoformat()
+
+
 def coletar_funil_rows(db):
+    """Linhas por dia (Brasilia). Visitas = pessoas: cada visitorId conta uma vez, no dia da primeira visita,
+    para que a soma de qualquer periodo nao repita a mesma pessoa (auditoria de 26/11: 268 eventos, ~107 pessoas).
+    Num recorte que comeca depois da primeira visita, quem voltou nao entra de novo."""
     eventos = list(db.collection("analytics_funnel_events").stream())
-    por_dia, checkout = {}, {}
+    por_dia, checkout, primeira_visita = {}, {}, {}
     for e in eventos:
         d = e.to_dict()
-        dia = str(d.get("timestamp", ""))[:10]
+        dia = dia_brasilia(d.get("timestamp"))
         if not dia:
             continue
         por_dia.setdefault(dia, Counter())
         t = d.get("type")
+        quem = d.get("visitorId") or getattr(e, "id", None) or id(e)
         if t == "lead_captured" and lead_de_teste(d):
             continue
         if t == "cta_click" and not clique_de_compra(d):
             continue
-        if t == "checkout_view":  # meta da Tamyris e visitante do checkout, nao abertura do modal
-            checkout.setdefault(dia, set()).add(d.get("visitorId") or getattr(e, "id", None) or id(e))
+        if t == "page_view":
+            primeira_visita[quem] = min(primeira_visita.get(quem, dia), dia)
             continue
-        if t in ("page_view", "cta_click", "lead_captured", "checkout_view", "purchase_completed"):
+        if t == "checkout_view":  # meta da Tamyris e visitante do checkout, nao abertura do modal
+            checkout.setdefault(dia, set()).add(quem)
+            continue
+        if t in ("cta_click", "lead_captured", "purchase_completed"):
             por_dia[dia][t] += 1
+    for dia in primeira_visita.values():
+        por_dia[dia]["page_view"] += 1
 
     rows = []
     for dia in sorted(por_dia.keys()):
@@ -464,8 +533,9 @@ def montar_painel(funil_rows, resumo, pre_approvals, asaas_rows, leads_elab, env
                       [[o, n] for o, n in pre_approvals.get("origens", [])]
                       + [["Dos quais vieram de um disparo da Brenda (medido desde 23/11)", brenda]],
                       formatos=[None, dp.FMT_INT], spans=[9, 3]))
-    aviso_site = ("Contagem do proprio site · 'Clicaram em comprar' = botao Garantir Meu Acesso, que leva ao checkout"
-                  " (o login fica fora) · o Google Analytics, mais abaixo, conta sessoes desde 16/11")
+    aviso_site = ("Contagem do proprio site · visitas = pessoas, cada uma no dia da 1a visita (horario de Brasilia)"
+                  " · 'Clicaram em comprar' = botao Garantir Meu Acesso, que leva ao checkout (login e 'Ja tenho uma"
+                  " conta' ficam fora) · o Google Analytics, mais abaixo, conta sessoes desde 16/11")
     p.linha(fl.FunilVivo("Site do AprovAI (periodo A)", fs, funil_site(funil_rows), altura=340, subtitulo=aviso_site),
             _visitas_vivas(fs))
     elab = funil_elaboracao(leads_elab) if leads_elab is not None else None

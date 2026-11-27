@@ -1,7 +1,7 @@
 """
 HubSpot, pipeline Incentivador (`default`): leitura para a aba `Incentivador`.
 
-- `coletar()`: total de cards por `trabalhado_por` (Automatize x Executivo Brada) e
+- `coletar()`: total de cards por `trabalhado_por` (Automatize x Executivo Brada x vazio) e
   os deals que estao em "[EV] Reuniao Agendada" ou alem, com o caminho pelo qual
   chegaram la (automatico pela integracao, manual, ou ja criado na fase).
 - `estagios_ao_vivo()`: estagio ATUAL de uma lista de deals (o banco da Automatize
@@ -115,6 +115,11 @@ def coletar():
         {"propertyName": "pipeline", "operator": "EQ", "value": PIPELINE_INCENTIVADOR},
         {"propertyName": "trabalhado_por", "operator": "EQ", "value": "Executivo Brada"},
     ])
+    # Auditoria 26/11: deal sem `trabalhado_por` contava em "Reunioes: todas as origens" e sumia do grafico
+    total_sem_origem = hs_total([
+        {"propertyName": "pipeline", "operator": "EQ", "value": PIPELINE_INCENTIVADOR},
+        {"propertyName": "trabalhado_por", "operator": "NOT_HAS_PROPERTY"},
+    ])
 
     deals_beyond = hs_search_paginado({
         "filterGroups": [{"filters": [
@@ -149,6 +154,7 @@ def coletar():
     return {
         "total_automatize": total_automatize,
         "total_executivo": total_executivo,
+        "total_sem_origem": total_sem_origem,
         "rows": rows,
     }
 

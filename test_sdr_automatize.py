@@ -62,17 +62,44 @@ class _Conn:
 
 
 def test_fila_do_dia_separa_enviados_e_espera_com_canal_mais_comum():
-    fila = sdra.fila_do_dia(_Conn([("elaboracao", "fila", "whatsapp", 230), ("elaboracao", "adiado", "email", 9),
-                                   ("incentivador", "enviado", "email", 8)]))
+    fila = sdra.fila_do_dia(_Conn([("elaboracao", "fila", "whatsapp", 230, 230), ("elaboracao", "adiado", "email", 9, 9),
+                                   ("incentivador", "enviado", "email", 8, 8)]))
     assert fila["elaboracao"] == {"enviados": 0, "na_fila": 239, "canal_fila": "whatsapp"}
     assert fila["incentivador"] == {"enviados": 8, "na_fila": 0, "canal_fila": ""}
+
+
+def test_fila_conta_pessoas_e_nao_vagas_do_plano():
+    """Auditoria de 26/11: o plano tem uma vaga por lead x canal. Em 27/11 eram 1.405 vagas para 838 pessoas
+    na Elaboracao; a 5a coluna da consulta conta cada lead uma vez so."""
+    fila = sdra.fila_do_dia(_Conn([("elaboracao", "fila", "email", 614, 614), ("elaboracao", "fila", "whatsapp", 758, 200),
+                                   ("elaboracao", "planejado", "whatsapp", 4, 0),
+                                   ("aprovado_selfservice", "enviado_n8n", "email", 1, 1)]))
+    assert fila["elaboracao"] == {"enviados": 0, "na_fila": 814, "canal_fila": "whatsapp"}
+    assert fila["aprovado_selfservice"] == {"enviados": 1, "na_fila": 0, "canal_fila": ""}  # n8n tambem saiu
+    assert "count(*) filter (where primeira)" in sdra.CONSULTA_FILA
+
+
+def test_fonte_vazia_vem_da_origem_do_lead_e_lead_de_teste_fica_fora():
+    """Auditoria de 26/11: 240 envios da Elaboracao sem fonte eram da planilha da Kiwify (leads.origem)."""
+    marcas = (False,) * len(sdra.MARCAS)
+    kiwify = sdra.envio_da_linha(("elaboracao", D(2026, 11, 20), "email", None) + marcas + ("kiwify-aprovai", "id-1"))
+    assert kiwify["fonte"] == "Kiwify (planilha importada)" and "origem" not in kiwify
+    assert kiwify["lead_hash"] == sdra.hash_lead("id-1") and "lead_id" not in kiwify
+    outra = sdra.envio_da_linha(("elaboracao", D(2026, 11, 20), "email", None) + marcas + ("xpto", "id-2"))
+    assert outra["fonte"] is None  # origem desconhecida segue "sem fonte"
+    salic = sdra.envio_da_linha(("elaboracao", D(2026, 11, 20), "email", "salic") + marcas + ("kiwify-aprovai", "id-3"))
+    assert salic["fonte"] == "salic"  # fonte_slug do envio manda
+    assert "<> all(%s)" in sdra.CONSULTA_FRENTES and sdra.LEADS_TESTE
+    assert all(len(i) == 36 for i in sdra.LEADS_TESTE)  # por id (uuid), nunca por nome
 
 
 def test_cadastro_e_card_so_contam_depois_do_disparo():
     """3 dos 4 cadastros da elaboracao (e 5 dos 52 dos aprovados) eram de quem ja tinha
     conta antes do e-mail. As duas consultas tem que exigir data >= dia do envio."""
+    import re
     import sdr_automatize as sdra
     for consulta in (sdra.CONSULTA, sdra.CONSULTA_FRENTES):
+        consulta = re.sub(r"\be\.", "", consulta)  # CONSULTA_FRENTES usa o apelido `e` (junta com dados.leads)
         assert "coalesce(cadastro_em::date >= dia, false)" in consulta
         assert "coalesce(card_hubspot_em::date >= dia, false)" in consulta
         assert "cadastro_em is not null" not in consulta

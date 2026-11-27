@@ -107,10 +107,19 @@ def por_executivo(cards, nomes, hoje):
     return sorted(linhas, key=lambda r: (-r[1], r[0]))
 
 
+ORIGENS_HUBSPOT = ("Automatize", "Executivo Brada")  # as unicas opcoes de `trabalhado_por` no HubSpot
+
+
 def pipeline_hubspot(hs):
+    """Uma barra por `trabalhado_por`. Auditoria 26/11: o deal com o campo vazio contava no cartao
+    "Reunioes: todas as origens" (145) e sumia daqui (139); agora vira a barra "Sem origem" e as reunioes batem."""
     rows = hs["rows"]
-    return [["Agendados pela Brenda", hs["total_automatize"], sum(1 for r in rows if r[2] == "Automatize")],
-            ["Trazidos pelos executivos", hs["total_executivo"], sum(1 for r in rows if r[2] == "Executivo Brada")]]
+    linhas = [["Agendados pela Brenda", hs["total_automatize"], sum(1 for r in rows if r[2] == "Automatize")],
+              ["Trazidos pelos executivos", hs["total_executivo"], sum(1 for r in rows if r[2] == "Executivo Brada")]]
+    sem_origem = sum(1 for r in rows if r[2] not in ORIGENS_HUBSPOT)
+    if sem_origem or hs.get("total_sem_origem"):
+        linhas.append(["Sem origem (campo vazio no HubSpot)", hs.get("total_sem_origem", 0), sem_origem])
+    return linhas
 
 
 def montar_painel(leads, hs, agora, executivos=(), envios=None, sem_contato=0):
@@ -149,13 +158,14 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None, sem_contato=0):
         p.linha(dp.Cartao("Cards da Brenda no HubSpot (desde o inicio)", cards),
                 dp.Cartao("Cards sem executivo dono (hoje)", sem_dono),
                 dp.Cartao(f"Cards no mesmo estagio ha {DIAS_PARADO}+ dias (hoje)", sum(r[3] for r in executivos)),
-                dp.Cartao("Reunioes da Brenda (desde o inicio)", sum(r[5] for r in executivos)))
+                dp.Cartao("Reunioes de cards da Automatize (desde o inicio)", sum(r[5] for r in executivos)))
         # O card nasce quando o lead ABRE a agenda (robo da Automatize), nao quando marca a reuniao.
         p.linha(dp.Tabela(f"Cards da Brenda por executivo (desde o inicio) · parado = {DIAS_PARADO}+ dias no mesmo estagio",
                           CAB_EXECUTIVOS,
                           executivos, formatos=[None] + [dp.FMT_INT] * 7 + [dp.FMT_PCT], gradiente=[3],
                           spans=[2, 1, 2, 1, 2, 1, 1, 1, 1]))
-    p.linha(fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO, maturacao=fl.MATURACAO_DIAS))
+    comparacao = fl.comparacao_ab("Periodo A contra periodo B", flt, FUNIL_VIVO, maturacao=fl.MATURACAO_DIAS)
+    p.linha(comparacao)
     p.linha(fl.evolucao("Leads disparados no periodo A", flt, "disparados", "canal", canais,
                         subtitulo="Por dia ou semana (filtro 'Agrupar por'), empilhado por canal"))
     recentes = agora.date() - datetime.timedelta(days=2 * fl.JANELA_PADRAO - 1)
@@ -169,7 +179,7 @@ def montar_painel(leads, hs, agora, executivos=(), envios=None, sem_contato=0):
                      subtitulo="Todo o pipeline, nao so os leads da Brenda"))
     etapas = funil(leads)
     resumo = {"incentivador_disparados": etapas[0][1], "incentivador_engajaram": etapas[1][1],
-              "incentivador_cards": etapas[2][1],
+              "incentivador_agenda": etapas[2][1],  # abriram a agenda (etapa 3 do funil), nao cards
               "incentivador_reuniao": etapas[-1][1], "incentivador_pipeline_reuniao": len(hs["rows"]),
               # mesmo numero do cartao "Cards que chegaram a reuniao" (por card, inclui lead fora da base de envios)
               "incentivador_cards_reuniao": sum(r[5] for r in executivos) if executivos else etapas[-1][1],

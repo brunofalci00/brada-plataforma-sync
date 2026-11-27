@@ -40,7 +40,18 @@ def test_visao_geral_cartoes_alerta_e_funil_por_produto():
 def test_reunioes_separam_hubspot_da_brenda():
     painel, _ = vg.montar_painel(_resumo(), AGORA)
     assert _componente(painel, "Reunioes: todas as origens").valor == 151
-    assert _componente(painel, "Reunioes: vindas da Brenda").valor == 1
+    assert _componente(painel, "Reunioes: vindas da Brenda").valor == 0
+
+
+def test_reuniao_da_brenda_so_conta_lead_que_ela_disparou():
+    """Auditoria 26/11: o card sem contato (25/11) nao veio do fluxo da Brenda e nao pode virar reuniao dela
+    sobre quem clicou. Cartao e funil leem a reuniao do funil por lead, nao a soma por card."""
+    r = dict(_resumo(), incentivador_reuniao=2, incentivador_cards_reuniao=3)
+    painel, _ = vg.montar_painel(r, AGORA)
+    assert _componente(painel, "Reunioes: vindas da Brenda").valor == 2
+    inc = next(l for l in _componente(painel, "Funil de cada produto").linhas if l[1] == "Brenda -> incentivadores")
+    assert inc[5] == "2 reunioes (3,1%)"  # 2 de 64 que clicaram ou responderam
+    assert "incentivador_cards_reuniao" not in vg.chaves_usadas()
 
 
 def test_receita_digital_soma_aprovai_e_primeira_fila():
